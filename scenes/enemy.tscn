@@ -9,7 +9,7 @@ radius = 1.01123
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_4ra3w"]
 
-[node name="Enemy" type="CharacterBody3D"]
+[node name="Enemy" type="CharacterBody3D" groups=["enemies"]]
 script = ExtResource("1_7p1mj")
 
 [node name="BaseCollider" type="CollisionShape3D" parent="."]

@@ -26,11 +26,13 @@ _data = {
 }
 point_count = 5
 
-[node name="Main" type="Node3D"]
+[node name="Main" type="Node3D" node_paths=PackedStringArray("spawn_point")]
 script = ExtResource("1_0wfyh")
+enemy_scene = ExtResource("3_sugp2")
+spawn_point = NodePath("EnemyPath/PathFollower")
 
 [node name="OverheadCamera" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 15, 15)
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 10, 10)
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-4.37114e-08, -0.707107, 0.707107, 0, 0.707107, 0.707107, -1, 3.09086e-08, -3.09086e-08, 15.0105, 15, -0.0108695)
@@ -50,7 +52,7 @@ curve = SubResource("Curve3D_0wfyh")
 transform = Transform3D(-0.960873, 0, 0.276985, 0, 1, 0, -0.276985, 0, -0.960873, 5, 0, 0)
 rotation_mode = 4
 
-[node name="Enemy" parent="EnemyPath/PathFollower" instance=ExtResource("3_sugp2")]
-transform = Transform3D(1, 0, -2.98023e-08, 0, 1, 0, 2.98023e-08, 0, 1, 0, 0.130977, 0)
-
 [node name="Tower" parent="." instance=ExtResource("2_0xm2m")]
+
+[node name="Tower2" parent="." instance=ExtResource("2_0xm2m")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 6.89997)

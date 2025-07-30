@@ -1,6 +1,7 @@
-[gd_scene load_steps=12 format=4 uid="uid://b22tilr55l82o"]
+[gd_scene load_steps=13 format=4 uid="uid://b22tilr55l82o"]
 
 [ext_resource type="Script" uid="uid://do7uhxbs26rue" path="res://scripts/tower.gd" id="1_2x682"]
+[ext_resource type="PackedScene" uid="uid://kjyp3nbsl47k" path="res://scenes/projectile.tscn" id="2_ay4al"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ofvlm"]
 
@@ -108,6 +109,7 @@ shadow_mesh = SubResource("ArrayMesh_dd7d4")
 
 [node name="Tower" type="Node3D"]
 script = ExtResource("1_2x682")
+projectile_scene = ExtResource("2_ay4al")
 
 [node name="tower_model" type="Node3D" parent="."]
 transform = Transform3D(-4.37114e-08, 0, 1, 0, 1, 0, -1, 0, -4.37114e-08, 0, 0, 0)
@@ -123,12 +125,12 @@ mesh = SubResource("ArrayMesh_akvhs")
 skeleton = NodePath("")
 
 [node name="Barrel" type="MeshInstance3D" parent="tower_model/Turret"]
-transform = Transform3D(0.25, 8.88178e-16, 0, 0, -1.31134e-08, -0.153846, 0, 0.3, -6.72483e-09, 2.71036e-08, 0, -0.775073)
+transform = Transform3D(-0.25, -2.62268e-08, 5.87903e-16, 0, -1.31134e-08, -0.153846, 2.18557e-08, -0.3, 6.72482e-09, 2.71036e-08, 0, -0.775073)
 mesh = SubResource("ArrayMesh_h80r8")
 skeleton = NodePath("")
 
 [node name="MuzzlePoint" type="Marker3D" parent="tower_model/Turret/Barrel"]
-transform = Transform3D(-0.749233, 0.662306, 1.05879e-22, -0.662306, -0.749233, -4.28301e-23, 2.90783e-15, 4.53497e-15, 1, 1.29202e-08, -0.774887, 0)
+transform = Transform3D(0.707107, -0.707107, 0, 0.707107, 0.707107, 0, 0, 0, 1, 0, 1, 0)
 
 [node name="DetectionArea" type="Area3D" parent="."]
 

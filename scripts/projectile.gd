@@ -1,16 +1,23 @@
-extends RigidBody3D
+extends Area3D
 
-@export var speed = 25.0
-var direction = Vector3.FORWARD
+@export var speed: float = 10.0
+@export var lifetime: float = 3.0
+var direction: Vector3 = Vector3.FORWARD
 
-func _ready():
-	# Optional: You can align the projectile mesh visually here if needed
-	look_at(global_transform.origin + direction, Vector3.UP)
+func _ready() -> void:
+	# Connect collision signal
+	connect("body_entered", _on_body_entered)
 
-func _physics_process(delta):
-	global_translate(direction * speed * delta)
+func _process(delta: float) -> void:
+	# Move the projectile
+	translate(direction * speed * delta)
 
-func _on_body_entered(body):
-	if body.name == "Enemy":
+	# Lifetime countdown
+	lifetime -= delta
+	if lifetime <= 0:
 		queue_free()
-		body.queue_free()
+
+func _on_body_entered(body: Node) -> void:
+	if body.has_method("take_damage"):
+		body.take_damage(1)
+	queue_free()
