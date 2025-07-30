@@ -34,7 +34,7 @@ func shoot():
 	var target_pos = target.global_transform.origin
 	var direction = (target_pos - origin).normalized()
 	bullet.global_transform.origin = origin
-	bullet.direction = direction  # assumes the projectile script has a `direction` variable
+	bullet.direction = direction
 	get_tree().current_scene.add_child(bullet)
 
 func _on_body_entered(body):

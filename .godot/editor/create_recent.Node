@@ -1,4 +1,5 @@
+Node3D
+CollisionShape3D
 PathFollow3D
 Path3D
-CollisionShape3D
 Area3D

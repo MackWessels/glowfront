@@ -1,8 +1,2 @@
-res://scenes/tower.tscn
-res://scripts/tower.gd
 res://scenes/enemy.tscn
-res://scripts/enemy.gd
-res://scenes/projectile.tscn
-res://scripts/projectile.gd
 res://scenes/main.tscn
-res://scripts/main.gd

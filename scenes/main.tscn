@@ -47,9 +47,10 @@ environment = SubResource("Environment_7dm0k")
 curve = SubResource("Curve3D_0wfyh")
 
 [node name="PathFollower" type="PathFollow3D" parent="EnemyPath"]
-transform = Transform3D(-0.960874, 0, 0.276984, 0, 1, 0, -0.276984, 0, -0.960874, 5, 0, 0)
+transform = Transform3D(-0.960873, 0, 0.276985, 0, 1, 0, -0.276985, 0, -0.960873, 5, 0, 0)
 rotation_mode = 4
 
 [node name="Enemy" parent="EnemyPath/PathFollower" instance=ExtResource("3_sugp2")]
+transform = Transform3D(1, 0, -2.98023e-08, 0, 1, 0, 2.98023e-08, 0, 1, 0, 0.130977, 0)
 
 [node name="Tower" parent="." instance=ExtResource("2_0xm2m")]
