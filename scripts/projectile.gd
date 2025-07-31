@@ -4,20 +4,16 @@ extends Area3D
 @export var lifetime: float = 3.0
 var direction: Vector3 = Vector3.FORWARD
 
-func _ready() -> void:
-	# Connect collision signal
+func _ready():
 	connect("body_entered", _on_body_entered)
 
-func _process(delta: float) -> void:
-	# Move the projectile
+func _process(delta):
 	translate(direction * speed * delta)
-
-	# Lifetime countdown
 	lifetime -= delta
 	if lifetime <= 0:
 		queue_free()
 
-func _on_body_entered(body: Node) -> void:
+func _on_body_entered(body):
 	if body.has_method("take_damage"):
 		body.take_damage(1)
 	queue_free()

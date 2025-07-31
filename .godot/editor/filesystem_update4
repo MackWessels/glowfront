@@ -1,8 +1,7 @@
 res://scenes/enemy.tscn
+res://scripts/projectile.gd
 res://scenes/main.tscn
-res://scripts/tower.gd
-res://scripts/enemy.gd
 res://scenes/tower.tscn
 res://scenes/projectile.tscn
-res://scripts/projectile.gd
-res://scripts/main.gd
+res://scripts/tower.gd
+res://scenes/tile.tscn

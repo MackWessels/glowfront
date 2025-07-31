@@ -53,6 +53,7 @@ transform = Transform3D(-0.960873, 0, 0.276985, 0, 1, 0, -0.276985, 0, -0.960873
 rotation_mode = 4
 
 [node name="Tower" parent="." instance=ExtResource("2_0xm2m")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.32953, 0, -9.79595)
 
 [node name="Tower2" parent="." instance=ExtResource("2_0xm2m")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 6.89997)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.486986, 0, -10.2514)
