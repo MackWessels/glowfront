@@ -7,7 +7,6 @@ var path_follow: PathFollow3D
 
 func _ready():
 	current_health = max_health
-	path_follow = get_parent()
 
 func _physics_process(delta):
 	if path_follow == null or not is_instance_valid(path_follow):
@@ -16,7 +15,7 @@ func _physics_process(delta):
 		return
 
 	path_follow.progress += speed * delta
-	global_transform.origin = path_follow.global_transform.origin
+	global_transform.origin = path_follow.global_position
 
 func take_damage(damage_amount: int):
 	current_health -= damage_amount

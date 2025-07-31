@@ -1,30 +1,45 @@
 extends Node3D
 
 @export var enemy_scene: PackedScene
-@export var spawn_point: Node3D
+@onready var camera = $OverheadCamera
+@onready var path = $EnemyPath
 
-var enemies_spawned = 0
-var max_enemies = 5
+var spawn_count = 0
 
 func _ready():
-	spawn_enemies()
+	for i in range(5):
+		spawn_enemy()
 
-func spawn_enemies():
-	var spawn_delay = 1.0
-	for i in range(max_enemies):
-		await get_tree().create_timer(spawn_delay).timeout
+func spawn_enemy():
+	if enemy_scene == null:
+		print("Enemy scene not assigned.")
+		return
 
-		var enemy_path_follow = PathFollow3D.new()
-		var enemy = enemy_scene.instantiate()
+	var enemy = enemy_scene.instantiate()
+	var follower = PathFollow3D.new()
+	follower.progress_ratio = 0.0
+	follower.add_child(enemy)
+	path.add_child(follower)
+	spawn_count += 1
 
-		# Set transform of path follow to spawn point
-		enemy_path_follow.transform = spawn_point.transform
+func _process(delta):
+	for follower in path.get_children():
+		if follower is PathFollow3D:
+			follower.progress_ratio += delta * 0.05
 
-		# Set the enemy's path follower reference
-		enemy.path_follow = enemy_path_follow
+func _unhandled_input(event):
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var from = camera.project_ray_origin(event.position)
+		var to = from + camera.project_ray_normal(event.position) * 1000.0
 
-		# Attach enemy to path follower and add to EnemyPath
-		enemy_path_follow.add_child(enemy)
-		$EnemyPath.add_child(enemy_path_follow)
+		var space_state = get_world_3d().direct_space_state
+		var query = PhysicsRayQueryParameters3D.create(from, to)
+		query.collision_mask = 1  # Adjust as needed for your Tile's layer
+		var result = space_state.intersect_ray(query)
 
-		enemies_spawned += 1
+		if result:
+			print("Clicked:", result.collider.name)
+			if result.collider.has_method("on_tile_clicked"):
+				result.collider.on_tile_clicked()
+			else:
+				print("Not a tile")

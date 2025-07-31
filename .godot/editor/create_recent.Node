@@ -1,7 +1,7 @@
-MeshInstance3D
 Area3D
+CollisionShape3D
+MeshInstance3D
 CharacterBody3D
 Node3D
-CollisionShape3D
 PathFollow3D
 Path3D
