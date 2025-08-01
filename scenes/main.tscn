@@ -1,7 +1,6 @@
-[gd_scene load_steps=9 format=3 uid="uid://b8msl4kqjlhan"]
+[gd_scene load_steps=8 format=3 uid="uid://b8msl4kqjlhan"]
 
 [ext_resource type="Script" uid="uid://43uec7mcm20v" path="res://scripts/main.gd" id="1_0wfyh"]
-[ext_resource type="PackedScene" uid="uid://b22tilr55l82o" path="res://scenes/tower.tscn" id="2_0xm2m"]
 [ext_resource type="PackedScene" uid="uid://bksm503hl2ahi" path="res://scenes/enemy.tscn" id="3_sugp2"]
 [ext_resource type="PackedScene" uid="uid://bejcwxqtu5216" path="res://scenes/tile.tscn" id="4_jyhfs"]
 
@@ -31,6 +30,7 @@ enemy_scene = ExtResource("3_sugp2")
 
 [node name="OverheadCamera" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 10, 10)
+current = true
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-4.37114e-08, -0.707107, 0.707107, 0, 0.707107, 0.707107, -1, 3.09086e-08, -3.09086e-08, 15.0105, 15, -0.0108695)
@@ -46,11 +46,13 @@ curve = SubResource("Curve3D_0wfyh")
 transform = Transform3D(-0.960873, 0, 0.276985, 0, 1, 0, -0.276985, 0, -0.960873, 5, 0, 0)
 rotation_mode = 4
 
-[node name="Tower" parent="." instance=ExtResource("2_0xm2m")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.3472, 0, -9.79595)
-
-[node name="Tower2" parent="." instance=ExtResource("2_0xm2m")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.25186, 0, -10.2514)
+[node name="TurretHolder" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.386268, 0)
 
 [node name="Tile" parent="." instance=ExtResource("4_jyhfs")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0775598, 0)
+
+[node name="Tile2" parent="." instance=ExtResource("4_jyhfs")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5.72857, 1.28761, 0)
+
+[node name="Tile3" parent="." instance=ExtResource("4_jyhfs")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 2.4346)
