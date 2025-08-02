@@ -9,17 +9,8 @@ func _ready():
 	for i in range(5):
 		spawn_enemy()
 
-	# DEBUG: See if the Tile node is found
-	var tile = get_node_or_null("Tile")
-	if tile:
-		print("Tile is present in Main!")
-	else:
-		print("Tile NOT found in Main.")
-
-
 func spawn_enemy():
 	if enemy_scene == null:
-		print("Enemy scene not assigned!")
 		return
 
 	var enemy = enemy_scene.instantiate()
@@ -29,7 +20,6 @@ func spawn_enemy():
 	follower.add_child(enemy)
 	path.add_child(follower)
 
-	print("Spawned enemy #", spawn_count + 1)
 	spawn_count += 1
 
 func _process(delta):
