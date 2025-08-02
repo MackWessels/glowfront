@@ -10,7 +10,7 @@ func _ready():
 		for z in range(rows):
 			var tile = tile_scene.instantiate()
 			add_child(tile)
-			tile.global_position = Vector3(x * tile_spacing, 0, z * tile_spacing)
+			tile.global_position = global_position + Vector3(x * tile_spacing, 0, z * tile_spacing)
 
 			# Set grid coordinates
 			tile.grid_x = x
