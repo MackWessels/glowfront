@@ -5,10 +5,7 @@ extends Node3D
 
 var spawn_count = 0
 
-func _ready():
-	for i in range(5):
-		await get_tree().create_timer(1.0).timeout
-		spawn_enemy()
+
 
 func spawn_enemy():
 	if enemy_scene == null:

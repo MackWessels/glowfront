@@ -1,11 +1,11 @@
-Timer
+CollisionShape3D
 MeshInstance3D
+Area3D
+Timer
 Node3D
 Camera3D
 DirectionalLight3D
 StaticBody3D
-Area3D
-CollisionShape3D
 CharacterBody3D
 PathFollow3D
 Path3D

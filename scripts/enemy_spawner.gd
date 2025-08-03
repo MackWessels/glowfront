@@ -3,7 +3,7 @@ extends Node3D
 @export var enemy_scene: PackedScene
 @export var spawn_count: int = 5
 @export var spawn_interval: float = 1.0
-@export var enemy_path: NodePath  # Optional: If using PathFollow3D
+@export var enemy_path: NodePath 
 
 var spawned = 0
 var timer := Timer.new()
