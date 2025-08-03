@@ -11,7 +11,7 @@ func _ready():
 	is_targetable = true
 	current_health = max_health
 	add_to_group("enemies")
-	print("Enemy spawned:", name)
+
 
 
 func _physics_process(delta):

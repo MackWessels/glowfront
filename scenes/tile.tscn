@@ -13,6 +13,7 @@ size = Vector3(2, 0.1, 2)
 size = Vector3(2.01019, 0.14469, 2.00403)
 
 [node name="Tile" type="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)
 script = ExtResource("1_3dk36")
 turret_scene = ExtResource("2_ywnoi")
 
