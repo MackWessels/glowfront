@@ -1,35 +1,24 @@
 extends Node3D
 
 @export var enemy_scene: PackedScene
-@export var spawn_count: int = 5
-@export var spawn_interval: float = 1.0
-@export var enemy_path: NodePath 
-
-var spawned = 0
-var timer := Timer.new()
+@export var tile_board: Node
+@export var spawn_interval: float = 1.5
 
 func _ready():
-	timer.wait_time = spawn_interval
-	timer.one_shot = false
-	timer.timeout.connect(_on_timer_timeout)
-	#add_child(timer)
-	timer.start()
+	spawn_enemies()
 
-func _on_timer_timeout():
-	if spawned >= spawn_count:
-		timer.stop()
+func spawn_enemies():
+	for i in range(15):
+		await get_tree().create_timer(spawn_interval).timeout
+		spawn_enemy()
+
+func spawn_enemy():
+	if not enemy_scene or tile_board.cached_path.is_empty():
+		print("Cannot spawn enemy: missing scene or path")
 		return
 
-	if enemy_scene:
-		var enemy = enemy_scene.instantiate()
-
-		if enemy_path != NodePath():
-			var path_follower = get_node(enemy_path).duplicate()
-			path_follower.add_child(enemy)
-			get_tree().current_scene.add_child(path_follower)
-		else:
-			get_tree().current_scene.add_child(enemy)
-
-		enemy.add_to_group("enemies") 
-
-		spawned += 1
+	var enemy = enemy_scene.instantiate()
+	enemy.path = tile_board.cached_path.duplicate()
+	enemy.path_index = 0
+	add_child(enemy)
+	enemy.global_position = enemy.path[0]

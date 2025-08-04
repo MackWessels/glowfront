@@ -12,7 +12,6 @@ spacing = 0.1
 goal_node = NodePath("Goal")
 spawner_node = NodePath("EnemySpawner")
 
-[node name="EnemySpawner" parent="." node_paths=PackedStringArray("tile_board") instance=ExtResource("3_2x8nh")]
-tile_board = NodePath("..")
+[node name="EnemySpawner" parent="." instance=ExtResource("3_2x8nh")]
 
 [node name="Goal" parent="." instance=ExtResource("4_ijtfa")]

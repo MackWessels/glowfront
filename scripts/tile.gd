@@ -13,6 +13,7 @@ var grid_position: Vector2i:
 		grid_z = value.y
 
 var tile_board: Node
+var is_wall = false
 
 func _input_event(camera: Camera3D, event: InputEvent, position: Vector3, normal: Vector3, shape_idx: int) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
@@ -20,16 +21,15 @@ func _input_event(camera: Camera3D, event: InputEvent, position: Vector3, normal
 			place_turret()
 
 func place_turret():
-	if turret_scene == null:
-		return
-
 	var turret = turret_scene.instantiate()
-
-	var holder = get_tree().get_current_scene().get_node_or_null("TurretHolder")
-	if holder:
-		holder.add_child(turret)
-	else:
-		get_tree().get_root().add_child(turret)
-
 	turret.global_position = global_position
+	get_tree().get_root().add_child(turret)
 	has_turret = true
+	set_wall(true)
+	tile_board.update_path()
+
+func set_wall(value: bool):
+	is_wall = value
+
+func is_walkable() -> bool:
+	return not is_wall

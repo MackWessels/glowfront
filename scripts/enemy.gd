@@ -3,8 +3,10 @@ extends CharacterBody3D
 @export var speed: float = 3.0
 @export var max_health: int = 3
 var current_health: int
-var path_follow: PathFollow3D
 var is_targetable = false
+
+var path: Array = []
+var path_index: int = 0
 
 func _ready():
 	await get_tree().create_timer(0.1).timeout
@@ -12,18 +14,21 @@ func _ready():
 	current_health = max_health
 	add_to_group("enemies")
 
-
+	print("Enemy path:", path)
 
 func _physics_process(delta):
-	if path_follow == null or not is_instance_valid(path_follow):
-		return
-	if not path_follow.is_inside_tree():
+	if path_index >= path.size():
 		return
 
-	path_follow.progress += speed * delta
-	global_transform.origin = path_follow.global_position
+	var target_pos = path[path_index]
+	var distance = global_position.distance_to(target_pos)
 
-func take_damage(damage_amount: int):
-	current_health -= damage_amount
-	if current_health <= 0:
-		queue_free()
+	if distance < .5:
+		global_position = target_pos
+		path_index += 1
+		velocity = Vector3.ZERO
+	else:
+		var direction = (target_pos - global_position).normalized()
+		velocity = direction * speed
+
+	move_and_slide()
