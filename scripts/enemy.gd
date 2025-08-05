@@ -1,34 +1,31 @@
 extends CharacterBody3D
 
-@export var speed: float = 3.0
-@export var max_health: int = 3
-var current_health: int
-var is_targetable = false
+@export var speed := 5.0
 
-var path: Array = []
-var path_index: int = 0
+var distance := 0.0
+var curve: Curve3D
+var total_length := 0.0
 
-func _ready():
-	await get_tree().create_timer(0.1).timeout
-	is_targetable = true
-	current_health = max_health
-	add_to_group("enemies")
+func set_path(new_curve: Curve3D) -> void:
+	curve = new_curve
+	if curve:
+		total_length = curve.get_baked_length()
 
-	print("Enemy path:", path)
-
-func _physics_process(delta):
-	if path_index >= path.size():
+func _process(delta: float) -> void:
+	if not curve or total_length <= 0:
 		return
 
-	var target_pos = path[path_index]
-	var distance = global_position.distance_to(target_pos)
+	distance += speed * delta
 
-	if distance < .5:
-		global_position = target_pos
-		path_index += 1
-		velocity = Vector3.ZERO
-	else:
-		var direction = (target_pos - global_position).normalized()
-		velocity = direction * speed
+	if distance >= total_length:
+		queue_free()
+		return
 
-	move_and_slide()
+	var current_pos = curve.sample_baked(distance, true)
+	global_position = current_pos
+
+	var lookahead_distance = min(distance + 0.1, total_length)
+	var ahead_pos = curve.sample_baked(lookahead_distance, true)
+	var direction = (ahead_pos - current_pos).normalized()
+
+	look_at(current_pos + direction, Vector3.UP)

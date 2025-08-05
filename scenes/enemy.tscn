@@ -26,6 +26,7 @@ shape = SubResource("SphereShape3D_4ra3w")
 curve = SubResource("Curve3D_md0e3")
 
 [node name="PathFollow3D" type="PathFollow3D" parent="Path3D"]
+loop = false
 
 [node name="UFO" parent="Path3D/PathFollow3D" instance=ExtResource("2_md0e3")]
 

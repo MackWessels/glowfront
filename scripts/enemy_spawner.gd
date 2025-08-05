@@ -13,12 +13,18 @@ func spawn_enemies():
 		spawn_enemy()
 
 func spawn_enemy():
-	if not enemy_scene or tile_board.cached_path.is_empty():
-		print("Cannot spawn enemy: missing scene or path")
+	if not enemy_scene or not tile_board.has_node("Path3D"):
+		print("Missing enemy scene or tile_board Path3D")
 		return
 
 	var enemy = enemy_scene.instantiate()
-	enemy.path = tile_board.cached_path.duplicate()
-	enemy.path_index = 0
+	var path3d = tile_board.get_node("Path3D")
+	var curve = path3d.curve
+
+	if curve == null or curve.get_point_count() == 0:
+		print("No path curve found")
+		return
+
+	# Pass the curve to the enemy
+	enemy.set_path(curve)
 	add_child(enemy)
-	enemy.global_position = enemy.path[0]
