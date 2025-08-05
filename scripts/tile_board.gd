@@ -4,9 +4,10 @@ extends Node3D
 @export var tile_scene: PackedScene
 @export var tile_size: float = 2.0
 @export var spacing: float = 0.2
-
 @export var goal_node: Node3D
 @export var spawner_node: Node3D
+
+signal path_updated(curve: Curve3D)
 
 var tiles = {}
 var cached_path: Array = []
@@ -55,12 +56,12 @@ func position_portal(portal: Node3D, side: String):
 		portal.global_position = tile.global_position
 		portal.rotation.y = rotation_y
 
-
 func find_path(start: Vector2i, goal: Vector2i) -> Array:
 	var open_set = [start]
 	var came_from = {}
 	var g_score = {start: 0}
 	var f_score = {start: start.distance_to(goal)}
+	var INF = 9999999
 
 	while open_set.size() > 0:
 		open_set.sort_custom(func(a, b): return f_score.get(a, INF) < f_score.get(b, INF))
@@ -71,42 +72,55 @@ func find_path(start: Vector2i, goal: Vector2i) -> Array:
 			while current in came_from:
 				current = came_from[current]
 				path.insert(0, current)
-			return path.map(func(p): return tiles[p].global_position)
 
+			var world_path = []
+			for p in path:
+				if tiles.has(p):
+					world_path.append(tiles[p].global_position)
+			return world_path
+			
 		open_set.remove_at(0)
+		
 		for offset in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 			var neighbor = current + offset
-			var tile = tiles.get(neighbor)
-			if tile and tile.is_walkable():
-				var tentative_g = g_score.get(current, INF) + 1
-				if tentative_g < g_score.get(neighbor, INF):
-					came_from[neighbor] = current
-					g_score[neighbor] = tentative_g
-					f_score[neighbor] = tentative_g + neighbor.distance_to(goal)
-					if not neighbor in open_set:
-						open_set.append(neighbor)
-	
-	return []
+			if not tiles.has(neighbor):
+				continue
+			var tile = tiles[neighbor]
+			if not tile.is_walkable():
+				continue
+
+			var tentative_g = g_score.get(current, INF) + 1
+			if tentative_g < g_score.get(neighbor, INF):
+				came_from[neighbor] = current
+				g_score[neighbor] = tentative_g
+				f_score[neighbor] = tentative_g + neighbor.distance_to(goal)
+				if neighbor not in open_set:
+					open_set.append(neighbor)
+	return []  
+
 
 func update_path():
 	if not is_instance_valid(spawner_node) or not is_instance_valid(goal_node):
 		cached_path = []
 		return
 
-	var start_tile = world_to_tile(spawner_node.global_position)
+	var from_tile = world_to_tile(spawner_node.global_position)
 	var end_tile = world_to_tile(goal_node.global_position)
-	
-	cached_path = find_path(start_tile, end_tile)  # ← Keep this for spawner
-	print("Updated path: ", cached_path)
+	cached_path = find_path(from_tile, end_tile)
+
+	var curve := Curve3D.new()
+	for point in cached_path:
+		curve.add_point(point)
+
+	$Path3D.curve = curve
+	emit_signal("path_updated", curve)
 
 	update_visual_path(cached_path)
 	draw_debug_path(cached_path)
 
 
 func world_to_tile(pos: Vector3) -> Vector2i:
-	var x = int(round(pos.x / (tile_size + spacing)))
-	var z = int(round(pos.z / (tile_size + spacing)))
-	return Vector2i(x, z)
+	return Vector2i(round(pos.x / 2.2), round(pos.z / 2.2))
 
 func get_path_from(world_pos: Vector3) -> Array:
 	var from_tile = world_to_tile(world_pos)
