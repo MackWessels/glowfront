@@ -85,16 +85,23 @@ func find_path(start: Vector2i, goal: Vector2i) -> Array:
 					f_score[neighbor] = tentative_g + neighbor.distance_to(goal)
 					if not neighbor in open_set:
 						open_set.append(neighbor)
+	
 	return []
 
 func update_path():
 	if not is_instance_valid(spawner_node) or not is_instance_valid(goal_node):
 		cached_path = []
 		return
+
 	var start_tile = world_to_tile(spawner_node.global_position)
 	var end_tile = world_to_tile(goal_node.global_position)
-	cached_path = find_path(start_tile, end_tile)
+	
+	cached_path = find_path(start_tile, end_tile)  # ← Keep this for spawner
 	print("Updated path: ", cached_path)
+
+	update_visual_path(cached_path)
+	draw_debug_path(cached_path)
+
 
 func world_to_tile(pos: Vector3) -> Vector2i:
 	var x = int(round(pos.x / (tile_size + spacing)))
@@ -105,3 +112,27 @@ func get_path_from(world_pos: Vector3) -> Array:
 	var from_tile = world_to_tile(world_pos)
 	var end_tile = world_to_tile(goal_node.global_position)
 	return find_path(from_tile, end_tile)
+
+func update_visual_path(points) -> void:
+	var path_node = $Path3D
+	var curve = Curve3D.new()
+	for point in points:
+		curve.add_point(point)
+	path_node.curve = curve
+
+
+func draw_debug_path(points) -> void:
+	if has_node("DebugPathMeshes"):
+		$DebugPathMeshes.queue_free()
+		await get_tree().process_frame 
+
+	var container = Node3D.new()
+	container.name = "DebugPathMeshes"
+	add_child(container)
+
+	for point in points:
+		var mesh = MeshInstance3D.new()
+		mesh.mesh = SphereMesh.new()
+		mesh.scale = Vector3.ONE * 0.5
+		mesh.position = point
+		container.add_child(mesh)

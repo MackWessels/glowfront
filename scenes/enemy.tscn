@@ -1,4 +1,4 @@
-[gd_scene load_steps=5 format=3 uid="uid://bksm503hl2ahi"]
+[gd_scene load_steps=6 format=3 uid="uid://bksm503hl2ahi"]
 
 [ext_resource type="Script" uid="uid://cm3n6i18uv218" path="res://scripts/enemy.gd" id="1_7p1mj"]
 [ext_resource type="PackedScene" uid="uid://dbk0o7kp4ikj3" path="res://models/UFO.glb" id="2_md0e3"]
@@ -8,6 +8,8 @@ height = 0.237122
 radius = 1.01123
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_4ra3w"]
+
+[sub_resource type="Curve3D" id="Curve3D_md0e3"]
 
 [node name="Enemy" type="CharacterBody3D" groups=["enemies"]]
 script = ExtResource("1_7p1mj")
@@ -20,6 +22,11 @@ shape = SubResource("CylinderShape3D_md0e3")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.168067, 0)
 shape = SubResource("SphereShape3D_4ra3w")
 
-[node name="UFO" parent="." instance=ExtResource("2_md0e3")]
+[node name="Path3D" type="Path3D" parent="."]
+curve = SubResource("Curve3D_md0e3")
 
-[editable path="UFO"]
+[node name="PathFollow3D" type="PathFollow3D" parent="Path3D"]
+
+[node name="UFO" parent="Path3D/PathFollow3D" instance=ExtResource("2_md0e3")]
+
+[editable path="Path3D/PathFollow3D/UFO"]
