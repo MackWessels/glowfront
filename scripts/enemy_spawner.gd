@@ -16,6 +16,9 @@ func spawn_enemy():
 	if not enemy_scene or not tile_board:
 		return
 
+	if tile_board.cached_path.is_empty():
+			return
+
 	var enemy = enemy_scene.instantiate()
 	add_child(enemy)
 
