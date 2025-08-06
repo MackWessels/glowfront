@@ -6,6 +6,9 @@ extends Node3D
 @export var spacing: float = 0.2
 @export var goal_node: Node3D
 @export var spawner_node: Node3D
+@export var placement_menu: PopupMenu
+var active_tile: Node = null
+
 
 signal path_updated(curve: Curve3D)
 
@@ -17,6 +20,8 @@ func _ready():
 	position_portal(goal_node, "right")
 	position_portal(spawner_node, "left")
 	update_path()
+	placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
+
 
 func generate_board():
 	for x in board_size:
@@ -30,6 +35,7 @@ func generate_board():
 			tile.global_position = pos
 			tile.grid_position = Vector2i(x, z)
 			tile.tile_board = self
+			tile.placement_menu = placement_menu
 			add_child(tile)
 			tiles[Vector2i(x, z)] = tile
 
@@ -150,3 +156,8 @@ func draw_debug_path(points) -> void:
 		mesh.scale = Vector3.ONE * 0.5
 		mesh.position = point
 		container.add_child(mesh)
+
+func _on_place_selected(action: String):
+	if active_tile and is_instance_valid(active_tile):
+		active_tile.apply_placement(action)
+	active_tile = null

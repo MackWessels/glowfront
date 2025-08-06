@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://dmvugjewscsdl"]
+
+[ext_resource type="Script" uid="uid://bi2p2duos7mwd" path="res://scripts/placement_menu.gd" id="1_4mouh"]
+
+[node name="PlacementMenu" type="PopupMenu"]
+visible = true
+unfocusable = true
+script = ExtResource("1_4mouh")

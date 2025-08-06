@@ -1,7 +1,8 @@
-[gd_scene load_steps=6 format=3 uid="uid://bejcwxqtu5216"]
+[gd_scene load_steps=7 format=3 uid="uid://bejcwxqtu5216"]
 
 [ext_resource type="Script" uid="uid://dot378ganxpkr" path="res://scripts/tile.gd" id="1_3dk36"]
 [ext_resource type="PackedScene" uid="uid://b22tilr55l82o" path="res://scenes/tower.tscn" id="2_ywnoi"]
+[ext_resource type="PackedScene" uid="uid://dj63u8wsfoy7r" path="res://scenes/wall.tscn" id="3_jy7pm"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jy7pm"]
 
@@ -13,9 +14,9 @@ size = Vector3(2, 0.1, 2)
 size = Vector3(2.01019, 0.14469, 2.00403)
 
 [node name="Tile" type="StaticBody3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)
 script = ExtResource("1_3dk36")
 turret_scene = ExtResource("2_ywnoi")
+wall_scene = ExtResource("3_jy7pm")
 
 [node name="TileMesh" type="MeshInstance3D" parent="."]
 mesh = SubResource("BoxMesh_uiyn6")

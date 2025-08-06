@@ -1,11 +1,13 @@
-[gd_scene load_steps=3 format=3 uid="uid://dj63u8wsfoy7r"]
+[gd_scene load_steps=4 format=3 uid="uid://dj63u8wsfoy7r"]
 
+[ext_resource type="Script" uid="uid://0abmiov2jtt8" path="res://scripts/wall.gd" id="1_2ktk7"]
 [ext_resource type="PackedScene" uid="uid://d4dnpay31m6vc" path="res://models/wall_model.glb" id="1_wykyb"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_2ktk7"]
 size = Vector3(2, 0.626099, 2)
 
-[node name="Wall" type="Node3D"]
+[node name="Wall" type="StaticBody3D"]
+script = ExtResource("1_2ktk7")
 
 [node name="wall_model" parent="." instance=ExtResource("1_wykyb")]
 
