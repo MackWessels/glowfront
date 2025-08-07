@@ -10,12 +10,13 @@
 
 [sub_resource type="SphereMesh" id="SphereMesh_ijtfa"]
 
-[node name="TileBoard" type="Node3D" node_paths=PackedStringArray("goal_node", "spawner_node", "placement_menu")]
+[node name="TileBoard" type="Node3D" node_paths=PackedStringArray("goal_node", "spawner_node", "placement_menu", "enemy_spawner")]
 script = ExtResource("1_58eyr")
 tile_scene = ExtResource("2_utemg")
 goal_node = NodePath("Goal")
 spawner_node = NodePath("EnemySpawner")
 placement_menu = NodePath("PlacementMenu")
+enemy_spawner = NodePath("EnemySpawner")
 
 [node name="EnemySpawner" parent="." node_paths=PackedStringArray("tile_board") instance=ExtResource("3_2x8nh")]
 tile_board = NodePath("..")

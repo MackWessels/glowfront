@@ -7,6 +7,7 @@ extends Node3D
 @export var goal_node: Node3D
 @export var spawner_node: Node3D
 @export var placement_menu: PopupMenu
+@export var enemy_spawner: Node3D
 
 signal path_updated(curve: Curve3D)
 signal global_path_changed
@@ -46,16 +47,16 @@ func position_portal(portal: Node3D, side: String):
 	match side:
 		"left":
 			tile_pos = Vector2i(0, board_size / 2)
-			rotation_y = deg_to_rad(90)  # Faces +X
+			rotation_y = deg_to_rad(90)
 		"right":
 			tile_pos = Vector2i(board_size - 1, board_size / 2)
-			rotation_y = deg_to_rad(-90)  # Faces -X
+			rotation_y = deg_to_rad(-90)
 		"top":
 			tile_pos = Vector2i(board_size / 2, 0)
-			rotation_y = deg_to_rad(0)  # Faces -Z
+			rotation_y = deg_to_rad(0)
 		"bottom":
 			tile_pos = Vector2i(board_size / 2, board_size - 1)
-			rotation_y = deg_to_rad(180)  # Faces +Z
+			rotation_y = deg_to_rad(180)
 
 	var tile = tiles.get(tile_pos)
 	if tile:
@@ -84,9 +85,9 @@ func find_path(start: Vector2i, goal: Vector2i) -> Array:
 				if tiles.has(p):
 					world_path.append(tiles[p].global_position)
 			return world_path
-			
+
 		open_set.remove_at(0)
-		
+
 		for offset in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 			var neighbor = current + offset
 			if not tiles.has(neighbor):
@@ -102,7 +103,7 @@ func find_path(start: Vector2i, goal: Vector2i) -> Array:
 				f_score[neighbor] = tentative_g + neighbor.distance_to(goal)
 				if neighbor not in open_set:
 					open_set.append(neighbor)
-	return []  
+	return []
 
 func update_path():
 	if not is_instance_valid(spawner_node) or not is_instance_valid(goal_node):
@@ -148,7 +149,7 @@ func update_visual_path(points) -> void:
 func draw_debug_path(points) -> void:
 	if has_node("DebugPathMeshes"):
 		$DebugPathMeshes.queue_free()
-		await get_tree().process_frame 
+		await get_tree().process_frame
 
 	var container = Node3D.new()
 	container.name = "DebugPathMeshes"
@@ -172,10 +173,16 @@ func _on_place_selected(action: String):
 
 		if test_path.is_empty():
 			blocked_tile = coords
+
+			if enemy_spawner and enemy_spawner.has_method("shoot_tile"):
+				enemy_spawner.shoot_tile(tiles[blocked_tile].global_position)
+
 			await get_tree().create_timer(1.0).timeout
+
 			if tiles.has(blocked_tile):
 				tiles[blocked_tile].break_tile()
 				update_path()
+
 			blocked_tile = Vector2i(-1, -1)
 		else:
 			update_path()
