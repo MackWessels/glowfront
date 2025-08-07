@@ -7,13 +7,14 @@ extends Node3D
 @export var goal_node: Node3D
 @export var spawner_node: Node3D
 @export var placement_menu: PopupMenu
-var active_tile: Node = null
-
 
 signal path_updated(curve: Curve3D)
+signal global_path_changed
 
 var tiles = {}
+var active_tile: Node = null
 var cached_path: Array = []
+var blocked_tile: Vector2i = Vector2i(-1, -1)
 
 func _ready():
 	generate_board()
@@ -21,7 +22,6 @@ func _ready():
 	position_portal(spawner_node, "left")
 	update_path()
 	placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
-
 
 func generate_board():
 	for x in board_size:
@@ -104,7 +104,6 @@ func find_path(start: Vector2i, goal: Vector2i) -> Array:
 					open_set.append(neighbor)
 	return []  
 
-
 func update_path():
 	if not is_instance_valid(spawner_node) or not is_instance_valid(goal_node):
 		cached_path = []
@@ -120,10 +119,10 @@ func update_path():
 
 	$Path3D.curve = curve
 	emit_signal("path_updated", curve)
+	emit_signal("global_path_changed")
 
 	update_visual_path(cached_path)
 	draw_debug_path(cached_path)
-
 
 func world_to_tile(pos: Vector3) -> Vector2i:
 	return Vector2i(round(pos.x / 2.2), round(pos.z / 2.2))
@@ -133,13 +132,18 @@ func get_path_from(world_pos: Vector3) -> Array:
 	var end_tile = world_to_tile(goal_node.global_position)
 	return find_path(from_tile, end_tile)
 
+func get_curve_for_path(path: Array) -> Curve3D:
+	var curve := Curve3D.new()
+	for point in path:
+		curve.add_point(point)
+	return curve
+
 func update_visual_path(points) -> void:
 	var path_node = $Path3D
 	var curve = Curve3D.new()
 	for point in points:
 		curve.add_point(point)
 	path_node.curve = curve
-
 
 func draw_debug_path(points) -> void:
 	if has_node("DebugPathMeshes"):
@@ -159,5 +163,21 @@ func draw_debug_path(points) -> void:
 
 func _on_place_selected(action: String):
 	if active_tile and is_instance_valid(active_tile):
+		var coords = active_tile.grid_position
 		active_tile.apply_placement(action)
+
+		var from_tile = world_to_tile(spawner_node.global_position)
+		var end_tile = world_to_tile(goal_node.global_position)
+		var test_path = find_path(from_tile, end_tile)
+
+		if test_path.is_empty():
+			blocked_tile = coords
+			await get_tree().create_timer(1.0).timeout
+			if tiles.has(blocked_tile):
+				tiles[blocked_tile].break_tile()
+				update_path()
+			blocked_tile = Vector2i(-1, -1)
+		else:
+			update_path()
+
 	active_tile = null
