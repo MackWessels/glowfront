@@ -1,8 +1,9 @@
-[gd_scene load_steps=7 format=3 uid="uid://bejcwxqtu5216"]
+[gd_scene load_steps=10 format=3 uid="uid://bejcwxqtu5216"]
 
 [ext_resource type="Script" uid="uid://dot378ganxpkr" path="res://scripts/tile.gd" id="1_3dk36"]
 [ext_resource type="PackedScene" uid="uid://b22tilr55l82o" path="res://scenes/tower.tscn" id="2_ywnoi"]
 [ext_resource type="PackedScene" uid="uid://dj63u8wsfoy7r" path="res://scenes/wall.tscn" id="3_jy7pm"]
+[ext_resource type="Texture2D" uid="uid://muds32bsfwrj" path="res://assets/broken.png" id="4_q7utx"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jy7pm"]
 
@@ -13,7 +14,15 @@ size = Vector3(2, 0.1, 2)
 [sub_resource type="BoxShape3D" id="BoxShape3D_3dk36"]
 size = Vector3(2.01019, 0.14469, 2.00403)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_q7utx"]
+albedo_texture = ExtResource("4_q7utx")
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_6p3j2"]
+material = SubResource("StandardMaterial3D_q7utx")
+
 [node name="Tile" type="StaticBody3D"]
+collision_layer = 129
+collision_mask = 129
 script = ExtResource("1_3dk36")
 turret_scene = ExtResource("2_ywnoi")
 wall_scene = ExtResource("3_jy7pm")
@@ -23,3 +32,9 @@ mesh = SubResource("BoxMesh_uiyn6")
 
 [node name="TileCollider" type="CollisionShape3D" parent="."]
 shape = SubResource("BoxShape3D_3dk36")
+
+[node name="CrackOverlay" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.051, 0)
+visible = false
+layers = 512
+mesh = SubResource("PlaneMesh_6p3j2")

@@ -4,6 +4,9 @@ extends StaticBody3D
 @export var wall_scene: PackedScene
 @export var placement_menu: PopupMenu
 
+@onready var crack_overlay = $CrackOverlay
+
+
 var has_turret = false
 var grid_x: int
 var grid_z: int
@@ -86,6 +89,10 @@ func break_tile():
 	if is_instance_valid(placed_object):
 		placed_object.queue_free()
 		placed_object = null
+	if is_instance_valid(crack_overlay):
+		crack_overlay.visible = true
 
 func repair_tile():
 	is_broken = false
+	if is_instance_valid(crack_overlay):
+		crack_overlay.visible = false

@@ -1,6 +1,7 @@
-res://scenes/tile_board.tscn
 res://scenes/tile.tscn
+res://scenes/tile_board.tscn
 res://scenes/main.tscn
 res://scenes/placement_menu.tscn
 res://scenes/enemy_spawner.tscn
 res://scenes/path_shot.tscn
+res://scripts/tile.gd
