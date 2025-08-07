@@ -5,3 +5,5 @@ res://scenes/placement_menu.tscn
 res://scenes/enemy_spawner.tscn
 res://scenes/path_shot.tscn
 res://scripts/tile.gd
+res://scripts/tile_board.gd
+res://scenes/wall.tscn

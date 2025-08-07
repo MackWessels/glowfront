@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3 uid="uid://b3dnbvtjgt0fw"]
+[gd_scene load_steps=7 format=3 uid="uid://b3dnbvtjgt0fw"]
 
 [ext_resource type="Script" uid="uid://ca8don34xaocj" path="res://scripts/tile_board.gd" id="1_58eyr"]
 [ext_resource type="PackedScene" uid="uid://bejcwxqtu5216" path="res://scenes/tile.tscn" id="2_utemg"]
@@ -6,9 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://bnpwkqho7ndgk" path="res://scenes/goal.tscn" id="4_ijtfa"]
 [ext_resource type="PackedScene" uid="uid://dmvugjewscsdl" path="res://scenes/placement_menu.tscn" id="5_jdbot"]
 
-[sub_resource type="Curve3D" id="Curve3D_ijtfa"]
-
-[sub_resource type="SphereMesh" id="SphereMesh_ijtfa"]
+[sub_resource type="Curve3D" id="Curve3D_jdbot"]
 
 [node name="TileBoard" type="Node3D" node_paths=PackedStringArray("goal_node", "spawner_node", "placement_menu", "enemy_spawner")]
 script = ExtResource("1_58eyr")
@@ -23,15 +21,11 @@ tile_board = NodePath("..")
 
 [node name="Goal" parent="." instance=ExtResource("4_ijtfa")]
 
+[node name="PlacementMenu" parent="." instance=ExtResource("5_jdbot")]
+
 [node name="Path3D" type="Path3D" parent="."]
-curve = SubResource("Curve3D_ijtfa")
+curve = SubResource("Curve3D_jdbot")
 
 [node name="PathFollow3D" type="PathFollow3D" parent="Path3D"]
-
-[node name="MeshInstance3D" type="MeshInstance3D" parent="Path3D/PathFollow3D"]
-transform = Transform3D(0.6, 0, 0, 0, 0.6, 0, 0, 0, 0.6, 0, 0, 0)
-mesh = SubResource("SphereMesh_ijtfa")
-
-[node name="PlacementMenu" parent="." instance=ExtResource("5_jdbot")]
 
 [editable path="EnemySpawner"]

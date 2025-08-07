@@ -24,6 +24,7 @@ func _ready():
 	update_path()
 	placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
 
+
 func generate_board():
 	for x in board_size:
 		for z in board_size:
@@ -39,6 +40,7 @@ func generate_board():
 			tile.placement_menu = placement_menu
 			add_child(tile)
 			tiles[Vector2i(x, z)] = tile
+
 
 func position_portal(portal: Node3D, side: String):
 	var tile_pos = Vector2i()
@@ -62,6 +64,7 @@ func position_portal(portal: Node3D, side: String):
 	if tile:
 		portal.global_position = tile.global_position
 		portal.rotation.y = rotation_y
+
 
 func find_path(start: Vector2i, goal: Vector2i) -> Array:
 	var open_set = [start]
@@ -105,6 +108,7 @@ func find_path(start: Vector2i, goal: Vector2i) -> Array:
 					open_set.append(neighbor)
 	return []
 
+
 func update_path():
 	if not is_instance_valid(spawner_node) or not is_instance_valid(goal_node):
 		cached_path = []
@@ -122,16 +126,16 @@ func update_path():
 	emit_signal("path_updated", curve)
 	emit_signal("global_path_changed")
 
-	update_visual_path(cached_path)
-	draw_debug_path(cached_path)
 
 func world_to_tile(pos: Vector3) -> Vector2i:
 	return Vector2i(round(pos.x / 2.2), round(pos.z / 2.2))
+
 
 func get_path_from(world_pos: Vector3) -> Array:
 	var from_tile = world_to_tile(world_pos)
 	var end_tile = world_to_tile(goal_node.global_position)
 	return find_path(from_tile, end_tile)
+
 
 func get_curve_for_path(path: Array) -> Curve3D:
 	var curve := Curve3D.new()
@@ -139,28 +143,6 @@ func get_curve_for_path(path: Array) -> Curve3D:
 		curve.add_point(point)
 	return curve
 
-func update_visual_path(points) -> void:
-	var path_node = $Path3D
-	var curve = Curve3D.new()
-	for point in points:
-		curve.add_point(point)
-	path_node.curve = curve
-
-func draw_debug_path(points) -> void:
-	if has_node("DebugPathMeshes"):
-		$DebugPathMeshes.queue_free()
-		await get_tree().process_frame
-
-	var container = Node3D.new()
-	container.name = "DebugPathMeshes"
-	add_child(container)
-
-	for point in points:
-		var mesh = MeshInstance3D.new()
-		mesh.mesh = SphereMesh.new()
-		mesh.scale = Vector3.ONE * 0.5
-		mesh.position = point
-		container.add_child(mesh)
 
 func _on_place_selected(action: String):
 	if active_tile and is_instance_valid(active_tile):

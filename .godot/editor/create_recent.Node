@@ -1,3 +1,5 @@
+PathFollow3D
+Path3D
 MeshInstance3D
 Decal
 Node3D
@@ -5,8 +7,6 @@ PopupMenu
 Popup
 StaticBody3D
 CollisionShape3D
-Path3D
-PathFollow3D
 Area3D
 Timer
 Camera3D
