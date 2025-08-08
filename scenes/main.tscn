@@ -32,7 +32,4 @@ light_energy = 0.7
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_7dm0k")
 
-[node name="TurretHolder" type="Node3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.386268, 0)
-
 [node name="TileBoard" parent="." instance=ExtResource("3_jyhfs")]
