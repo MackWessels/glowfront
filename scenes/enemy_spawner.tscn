@@ -1,6 +1,8 @@
-[gd_scene load_steps=12 format=4 uid="uid://4r5ok51tc656"]
+[gd_scene load_steps=14 format=4 uid="uid://4r5ok51tc656"]
 
 [ext_resource type="Script" uid="uid://duu1x8tbofnps" path="res://scripts/enemy_spawner.gd" id="1_ks1gq"]
+[ext_resource type="PackedScene" uid="uid://bksm503hl2ahi" path="res://scenes/enemy.tscn" id="2_devoi"]
+[ext_resource type="PackedScene" uid="uid://cwxcebgsj45yt" path="res://scenes/path_shot.tscn" id="3_xl0gr"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_devoi"]
 size = Vector3(2, 1, 1)
@@ -109,6 +111,8 @@ shadow_mesh = SubResource("ArrayMesh_fnwrj")
 
 [node name="EnemySpawner" type="Node3D"]
 script = ExtResource("1_ks1gq")
+enemy_scene = ExtResource("2_devoi")
+projectile_scene = ExtResource("3_xl0gr")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -1.5)
@@ -136,5 +140,3 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 2.4869e-14, 4.26326e-14, 1, 0, 0.6, 0)
 transform = Transform3D(1, 0, 0, 0, 0.1, 0, 0, 0, 1, 0, -0.11, 0)
 mesh = SubResource("ArrayMesh_jpxsq")
 skeleton = NodePath("")
-
-[connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]

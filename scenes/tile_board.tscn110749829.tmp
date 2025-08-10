@@ -8,13 +8,11 @@
 
 [sub_resource type="Curve3D" id="Curve3D_jdbot"]
 
-[node name="TileBoard" type="Node3D" node_paths=PackedStringArray("goal_node", "spawner_node", "placement_menu", "enemy_spawner")]
+[node name="TileBoard" type="Node3D" node_paths=PackedStringArray("goal_node", "spawner_node")]
 script = ExtResource("1_58eyr")
 tile_scene = ExtResource("2_jdbot")
 goal_node = NodePath("Goal")
 spawner_node = NodePath("EnemySpawner")
-placement_menu = NodePath("PlacementMenu")
-enemy_spawner = NodePath("EnemySpawner")
 
 [node name="EnemySpawner" parent="." instance=ExtResource("3_2x8nh")]
 

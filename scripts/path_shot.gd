@@ -26,10 +26,7 @@ func _process(delta):
 		queue_free()
 		return
 
-	# Interpolate X and Z
 	var horizontal_pos = start_position.lerp(target_position, t)
-
-	# Compute arc: Y = parabolic height
 	var arc = -4.0 * (t - 0.5) * (t - 0.5) + 1.0
 	var y_pos = lerp(start_position.y, target_position.y, t) + arc * arc_height
 

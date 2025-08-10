@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=4 uid="uid://b22tilr55l82o"]
+[gd_scene load_steps=14 format=4 uid="uid://b22tilr55l82o"]
 
 [ext_resource type="Script" uid="uid://do7uhxbs26rue" path="res://scripts/tower.gd" id="1_2x682"]
 [ext_resource type="PackedScene" uid="uid://kjyp3nbsl47k" path="res://scenes/projectile.tscn" id="2_ay4al"]
@@ -107,6 +107,9 @@ shadow_mesh = SubResource("ArrayMesh_dd7d4")
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_2x682"]
 
+[sub_resource type="BoxShape3D" id="BoxShape3D_ay4al"]
+size = Vector3(2, 1.31686, 2)
+
 [node name="Tower" type="Node3D"]
 script = ExtResource("1_2x682")
 projectile_scene = ExtResource("2_ay4al")
@@ -143,5 +146,10 @@ input_ray_pickable = false
 transform = Transform3D(25, 0, 0, 0, 25, 0, 0, 0, 25, 0, 0, 0)
 shape = SubResource("SphereShape3D_2x682")
 
-[connection signal="body_entered" from="DetectionArea" to="." method="_on_DetectionArea_body_entered"]
-[connection signal="body_exited" from="DetectionArea" to="." method="_on_DetectionArea_body_exited"]
+[node name="StaticBody3D" type="StaticBody3D" parent="."]
+collision_layer = 32
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.265604, 0)
+shape = SubResource("BoxShape3D_ay4al")

@@ -3,9 +3,9 @@ extends StaticBody3D
 @export var turret_scene: PackedScene
 @export var wall_scene: PackedScene
 @export var placement_menu: PopupMenu
-
 @onready var crack_overlay = $CrackOverlay
-
+@onready var _tile_mesh: MeshInstance3D = $"TileMesh"
+var _orig_mat: Material = null
 
 var has_turret = false
 var grid_x: int
@@ -24,11 +24,14 @@ var blocked := false
 var is_broken := false
 var placed_object: Node = null
 
+func _ready() -> void:
+	if is_instance_valid(_tile_mesh) and _orig_mat == null:
+		_orig_mat = _tile_mesh.material_override
+
 func _input_event(camera: Camera3D, event: InputEvent, position: Vector3, normal: Vector3, shape_idx: int) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		tile_board.active_tile = self
-
-		# Adjust menu items based on tile state
+		if tile_board:
+			tile_board.active_tile = self
 		placement_menu.clear()
 		if is_broken:
 			placement_menu.add_item("Repair", 2)
@@ -36,33 +39,39 @@ func _input_event(camera: Camera3D, event: InputEvent, position: Vector3, normal
 			placement_menu.add_item("Place Turret", 0)
 			placement_menu.add_item("Place Wall", 1)
 
-		# Show the menu
 		if placement_menu.item_count > 0:
 			placement_menu.position = get_viewport().get_mouse_position()
 			placement_menu.popup()
 
+
 func place_turret():
-	if is_broken:
+	if is_broken or turret_scene == null:
 		return
+	_clear_existing_object()
 	var turret = turret_scene.instantiate()
-	turret.global_position = global_position
-	get_tree().get_root().add_child(turret)
+	add_child(turret)
+	if turret is Node3D:
+		turret.global_transform = global_transform
 	placed_object = turret
 	has_turret = true
 	set_wall(true)
 	blocked = true
-	tile_board.update_path()
+	is_broken = false
+	_show_crack(false)
 
 func place_wall():
-	if is_broken:
+	if is_broken or wall_scene == null:
 		return
+	_clear_existing_object()
 	var wall = wall_scene.instantiate()
-	wall.global_position = global_position
-	get_tree().get_root().add_child(wall)
+	add_child(wall)
+	if wall is Node3D:
+		wall.global_transform = global_transform
 	placed_object = wall
 	set_wall(true)
 	blocked = true
-	tile_board.update_path()
+	is_broken = false
+	_show_crack(false)
 
 func set_wall(value: bool):
 	is_wall = value
@@ -79,20 +88,42 @@ func apply_placement(action: String):
 		"repair":
 			repair_tile()
 
+
 func break_tile():
-	if is_broken:
-		return
 	blocked = false
 	is_wall = false
 	has_turret = false
 	is_broken = true
-	if is_instance_valid(placed_object):
-		placed_object.queue_free()
-		placed_object = null
-	if is_instance_valid(crack_overlay):
-		crack_overlay.visible = true
+	_clear_existing_object()
+	_show_crack(true)
+	_tint_tile_red()
 
 func repair_tile():
 	is_broken = false
+	blocked = false
+	is_wall = false
+	has_turret = false
+	_show_crack(false)
+	_restore_tile_material()
+
+
+func _clear_existing_object() -> void:
+	if is_instance_valid(placed_object):
+		placed_object.queue_free()
+	placed_object = null
+
+func _show_crack(v: bool) -> void:
 	if is_instance_valid(crack_overlay):
-		crack_overlay.visible = false
+		crack_overlay.visible = v
+
+func _tint_tile_red() -> void:
+	if is_instance_valid(_tile_mesh):
+		if _orig_mat == null:
+			_orig_mat = _tile_mesh.material_override
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(1, 0, 0)
+		_tile_mesh.material_override = m
+
+func _restore_tile_material() -> void:
+	if is_instance_valid(_tile_mesh):
+		_tile_mesh.material_override = _orig_mat

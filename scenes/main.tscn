@@ -1,8 +1,7 @@
-[gd_scene load_steps=7 format=3 uid="uid://b8msl4kqjlhan"]
+[gd_scene load_steps=6 format=3 uid="uid://b8msl4kqjlhan"]
 
 [ext_resource type="Script" uid="uid://43uec7mcm20v" path="res://scripts/main.gd" id="1_0wfyh"]
 [ext_resource type="PackedScene" uid="uid://b3dnbvtjgt0fw" path="res://scenes/tile_board.tscn" id="3_jyhfs"]
-[ext_resource type="PackedScene" uid="uid://bksm503hl2ahi" path="res://scenes/enemy.tscn" id="3_sugp2"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7dm0k"]
 sky_top_color = Color(0.517647, 0.788235, 1, 1)
@@ -19,10 +18,9 @@ sky = SubResource("Sky_ig7tw")
 
 [node name="Main" type="Node3D"]
 script = ExtResource("1_0wfyh")
-enemy_scene = ExtResource("3_sugp2")
 
 [node name="OverheadCamera" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.573577, 0.819152, 0, -0.819152, 0.573577, 9, 10, 20)
+transform = Transform3D(1, 0, 0, 0, 0.34202, 0.939693, 0, -0.939693, 0.34202, 9, 12, 16)
 current = true
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
