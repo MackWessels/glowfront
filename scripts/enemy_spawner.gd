@@ -2,27 +2,101 @@ extends Node3D
 
 @export var enemy_scene: PackedScene
 @export var tile_board_path: NodePath = ^".."
-@export var spawn_every: float = 1.5
+@export var spawn_every: float = 1.5         
+
+
+@export var auto_start: bool = true           
+@export var wave_size_base: int = 8            
+@export var wave_size_inc: int = 2            
+@export var intermission: float = 4.0          
+@export var spawn_every_min: float = 0.25      
+@export var spawn_every_decay: float = 0.02 
+
 
 @export var projectile_scene: PackedScene
 @export var turret_path: NodePath = ^"mortar_tower_model/Turret"
 @export var barrel_path: NodePath = ^"mortar_tower_model/Turret/Barrel"
 @export var muzzle_path: NodePath = ^"mortar_tower_model/Turret/Barrel/MuzzlePoint"
 
+signal wave_started(wave: int)
+signal all_enemies_spawned(wave: int)
+
 var _board: Node = null
 var _timer: Timer = null
+var _between: Timer = null
 var _turret: Node3D = null
 var _barrel: Node3D = null
 var _muzzle: Node3D = null
 var _recoil_tw: Tween = null
+
+var _wave: int = 0
+var _to_spawn_in_wave: int = 0
 
 func _ready() -> void:
 	_board = get_node(tile_board_path)
 	_timer = $Timer
 	_timer.wait_time = spawn_every
 	_timer.timeout.connect(_spawn)
-	_timer.start()
+
+	# between-waves pause
+	_between = Timer.new()
+	_between.one_shot = true
+	add_child(_between)
+	_between.timeout.connect(_start_next_wave)
+
 	_cache_rig()
+
+	if auto_start:
+		_start_next_wave()
+	else:
+		_schedule_between()
+
+# waves
+func _start_next_wave() -> void:
+	_wave += 1
+	_to_spawn_in_wave = wave_size_base + max(0, _wave - 1) * wave_size_inc
+	emit_signal("wave_started", _wave)
+
+	# Slightly faster spawns as waves rise (capped by spawn_every_min)
+	var cur_interval: float = float(max(
+		spawn_every_min,
+		spawn_every - spawn_every_decay * float(_wave - 1)
+	))
+	_timer.wait_time = cur_interval
+	_timer.start()
+
+
+func _schedule_between() -> void:
+	_between.start(max(0.0, intermission))
+
+
+func _spawn() -> void:
+	if _to_spawn_in_wave <= 0:
+		_timer.stop()
+		emit_signal("all_enemies_spawned", _wave)
+		_schedule_between()
+		return
+
+	if enemy_scene == null or _board == null:
+		return
+
+	var e: CharacterBody3D = enemy_scene.instantiate()
+	e.tile_board_path = _board.get_path()
+	add_child(e)
+
+	var spawn_pos: Vector3 = _board.spawner_node.global_position
+	if _board.spawner_node.has_node("SpawnPoint"):
+		spawn_pos = _board.spawner_node.get_node("SpawnPoint").global_position
+	e.set_deferred("global_position", spawn_pos)
+
+	_to_spawn_in_wave -= 1
+
+	if _to_spawn_in_wave <= 0:
+		_timer.stop()
+		emit_signal("all_enemies_spawned", _wave)
+		_schedule_between()
+
+
 
 func _cache_rig() -> void:
 	_turret = null
@@ -40,19 +114,6 @@ func _cache_rig() -> void:
 		_barrel = find_child("Barrel", true, false)
 	if _muzzle == null:
 		_muzzle = find_child("MuzzlePoint", true, false)
-
-func _spawn() -> void:
-	if enemy_scene == null:
-		return
-	var e: CharacterBody3D = enemy_scene.instantiate()
-	e.tile_board_path = _board.get_path()
-	add_child(e)
-
-	var spawn_pos: Vector3 = _board.spawner_node.global_position
-	if _board.spawner_node.has_node("SpawnPoint"):
-		spawn_pos = _board.spawner_node.get_node("SpawnPoint").global_position
-	e.set_deferred("global_position", spawn_pos)
-
 
 func shoot_tile(target_world: Vector3) -> float:
 	_cache_rig()
