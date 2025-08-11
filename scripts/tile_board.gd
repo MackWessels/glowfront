@@ -18,8 +18,8 @@ var cost: Dictionary = {}
 var dir_field: Dictionary = {}
 
 # Pending/blue
-var closing: Dictionary = {}   
-var pending_action: Dictionary = {}   
+var closing: Dictionary = {}
+var pending_action: Dictionary = {}
 var _pending_mat_cache: Dictionary = {}
 
 # Grid
@@ -30,7 +30,7 @@ var _step: float = 1.0
 const ORTHO_DIRS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0),
 	Vector2i(0, 1), Vector2i(0, -1)
-	]
+]
 
 func _ready() -> void:
 	generate_board()
@@ -223,6 +223,7 @@ func get_dir_for_world(world_pos: Vector3) -> Vector3:
 
 	return dir_field.get(g, Vector3.ZERO)
 
+# Placement / pending flow
 func _on_place_selected(action: String) -> void:
 	if active_tile == null or not is_instance_valid(active_tile):
 		return
@@ -230,7 +231,7 @@ func _on_place_selected(action: String) -> void:
 	var coords: Vector2i = active_tile.grid_position
 	var blocks: bool = (action == "turret" or action == "wall")
 
-	# Non-blocking actions (e.g., repair)
+	# Non-blocking actions
 	if not blocks:
 		if closing.has(coords):
 			closing.erase(coords)
@@ -268,7 +269,7 @@ func _on_place_selected(action: String) -> void:
 	active_tile.apply_placement(action)
 	var ok: bool = _recompute_flow()
 	if not ok:
-		await _soft_block_sequence(active_tile, action, true) 
+		await _soft_block_sequence(active_tile, action, true)
 	else:
 		_clear_pending_visual(tiles[coords])
 		closing.erase(coords)
@@ -324,7 +325,7 @@ func _find_mesh(node: Node) -> MeshInstance3D:
 			return c as MeshInstance3D
 	return null
 
-
+# reachability / pause helpers 
 func _cells_reachable_from(start: Vector2i) -> Dictionary:
 	var seen := {}
 	if not in_bounds(start) or is_blocked(start):
@@ -357,6 +358,11 @@ func _pause_enemies_subset(reach: Dictionary, p: bool) -> Array:
 func _pause_spawner(p: bool) -> void:
 	if enemy_spawner == null:
 		return
+	# Prefer the spawner's API if present
+	if enemy_spawner.has_method("pause_spawning"):
+		enemy_spawner.pause_spawning(p)
+		return
+	# Fallback to a child Timer named "Timer" (legacy)
 	if enemy_spawner.has_node("Timer"):
 		var t: Timer = enemy_spawner.get_node("Timer")
 		if p:
@@ -375,7 +381,7 @@ func _edge_wait_enemy_off_then_break(cell: Vector2i) -> void:
 	while _any_enemy_on(cell):
 		await get_tree().process_frame
 
-	# Clear BLUE and break the tile (no shooting)
+	# Clear blue and break the tile (no shooting)
 	var tile: Node = tiles.get(cell, null)
 	if tile:
 		_clear_pending_visual(tile)

@@ -11,17 +11,19 @@ material = SubResource("StandardMaterial3D_jy7pm")
 size = Vector3(1.9, 0.1, 1.9)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_3dk36"]
-size = Vector3(2.01019, 0.14469, 2.00403)
+size = Vector3(2.01019, 0.114278, 2.00403)
 
 [node name="Tile" type="StaticBody3D"]
-collision_layer = 129
-collision_mask = 129
+collision_layer = 8
+collision_mask = 8
 script = ExtResource("1_3dk36")
 turret_scene = ExtResource("2_ywnoi")
 wall_scene = ExtResource("3_jy7pm")
 
 [node name="TileMesh" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
 mesh = SubResource("BoxMesh_uiyn6")
 
 [node name="TileCollider" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.0152062, 0)
 shape = SubResource("BoxShape3D_3dk36")
