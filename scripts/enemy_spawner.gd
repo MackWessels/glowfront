@@ -25,33 +25,20 @@ const ENTRY_CROWD_LIMIT: int   = 2
 const BLOCKED_RETRY_MIN: float = 0.06
 const BLOCKED_RETRY_MAX: float = 0.18
 
-# blockage-shoot animation rig
-@export var projectile_scene: PackedScene
-@export var turret_path: NodePath = ^"mortar_tower_model/Turret"
-@export var barrel_path: NodePath = ^"mortar_tower_model/Turret/Barrel"
-@export var muzzle_path: NodePath = ^"mortar_tower_model/Turret/Barrel/MuzzlePoint"
-
 signal wave_started(wave: int)
 signal all_enemies_spawned(wave: int)
 
 var _board: Node = null
 var _spawn_timer: Timer
 var _between: Timer
-var _turret: Node3D = null
-var _barrel: Node3D = null
-var _muzzle: Node3D = null
-var _recoil_tw: Tween = null
-
 var _wave: int = 0
 var _to_spawn_in_wave: int = 0
 var _cur_interval: float = 1.0
 var _sent_all_spawned: bool = false
 
-# --- Pause support ---
 var _paused: bool = false
 var _spawn_remaining: float = 0.0
 var _between_remaining: float = 0.0
-
 
 func _ready() -> void:
 	randomize()
@@ -69,7 +56,6 @@ func _ready() -> void:
 	_between.one_shot = true
 	add_child(_between)
 	_between.timeout.connect(_start_next_wave)
-	_cache_rig()
 	if auto_start:
 		_start_next_wave()
 	else:
@@ -249,54 +235,6 @@ func _maybe_finish_wave() -> void:
 	emit_signal("all_enemies_spawned", _wave)
 	_schedule_between()
 
-
-# blockage shooting animation-
-func _cache_rig() -> void:
-	_turret = null
-	_barrel = null
-	_muzzle = null
-	if turret_path != NodePath("") and has_node(turret_path):
-		_turret = get_node(turret_path)
-	if barrel_path != NodePath("") and has_node(barrel_path):
-		_barrel = get_node(barrel_path)
-	if muzzle_path != NodePath("") and has_node(muzzle_path):
-		_muzzle = get_node(muzzle_path)
-	if _turret == null:
-		_turret = find_child("Turret", true, false)
-	if _barrel == null:
-		_barrel = find_child("Barrel", true, false)
-	if _muzzle == null:
-		_muzzle = find_child("MuzzlePoint", true, false)
-
-func shoot_tile(target_world: Vector3) -> float:
-	var turret := get_node_or_null(turret_path) as Node3D
-	var barrel := get_node_or_null(barrel_path) as Node3D
-	var muzzle := get_node_or_null(muzzle_path) as Node3D
-
-	if projectile_scene == null || muzzle == null:
-		return 1.0
-
-	if turret != null:
-		var tpos := turret.global_transform.origin
-		var dir := target_world - tpos
-		dir.y = 0.0
-		if dir.length() > 0.001:
-			turret.look_at(tpos + dir, Vector3.UP)
-
-	var p := projectile_scene.instantiate() as Node3D
-	add_child(p)
-	p.global_position = muzzle.global_position
-
-	var flight_t := 1.0
-	var ft = p.get("flight_time")
-	if typeof(ft) == TYPE_FLOAT or TYPE_INT == typeof(ft):
-		flight_t = float(ft)
-	if p.has_method("launch"):
-		p.launch(target_world)
-
-	return max(flight_t, 0.05)
-
-
 func pause_spawning(pause: bool) -> void:
 	if _paused == pause:
 		return
@@ -316,7 +254,6 @@ func pause_spawning(pause: bool) -> void:
 		else:
 			_between_remaining = 0.0
 		return
-
 
 	# if intermission was in progress, resume that first and clear spawn stash.
 	if _between_remaining > 0.0:
