@@ -1,10 +1,12 @@
-res://scenes/main.tscn
 res://scenes/tile_board.tscn
+res://scenes/main.tscn
 res://scenes/tile.tscn
 res://scenes/enemy_spawner.tscn
 res://scenes/enemy.tscn
 res://scenes/placement_menu.tscn
 res://scenes/tower.tscn
-res://scripts/enemy.gd
-res://scripts/enemy_spawner.gd
 res://scripts/tile_board.gd
+res://scenes/goal.tscn
+res://scripts/enemy.gd
+res://scripts/tile.gd
+res://scripts/enemy_spawner.gd

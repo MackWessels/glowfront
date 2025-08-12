@@ -47,6 +47,11 @@ var _to_spawn_in_wave: int = 0
 var _cur_interval: float = 1.0
 var _sent_all_spawned: bool = false
 
+# --- Pause support ---
+var _paused: bool = false
+var _spawn_remaining: float = 0.0
+var _between_remaining: float = 0.0
+
 func _ready() -> void:
 	randomize()
 	_board = get_node(tile_board_path)
@@ -79,7 +84,12 @@ func _start_next_wave() -> void:
 	_schedule_next_spawn(true)
 
 func _schedule_between() -> void:
-	_between.start(max(0.0, intermission))
+	var delay: float = max(0.0, intermission) # or: float(max(0.0, intermission))
+	if _paused:
+		_between_remaining = delay
+	else:
+		_between.start(delay)
+
 
 func _schedule_next_spawn(first: bool = false) -> void:
 	if _to_spawn_in_wave <= 0:
@@ -88,12 +98,15 @@ func _schedule_next_spawn(first: bool = false) -> void:
 	var delay: float = max(spawn_every_min, _sample_exp(mean))
 	if first and INITIAL_DESYNC > 0.0:
 		delay += randf_range(0.0, INITIAL_DESYNC)
-	_spawn_timer.start(delay)
+
+	if _paused:
+		_spawn_remaining = delay
+	else:
+		_spawn_timer.start(delay)
 
 func _sample_exp(mean: float) -> float:
 	var u: float = clamp(randf(), 1e-6, 1.0 - 1e-6)
 	return -log(1.0 - u) * mean
-
 
 func _on_spawn_tick() -> void:
 	_spawn_one()
@@ -236,3 +249,28 @@ func _recoil_barrel() -> void:
 	_recoil_tw = create_tween()
 	_recoil_tw.tween_property(_barrel, "global_position", back, 0.08).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	_recoil_tw.tween_property(_barrel, "global_position", start, 0.12).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+
+# --- Public pause API (TileBoard calls this) ---
+func pause_spawning(pause: bool) -> void:
+	if _paused == pause:
+		return
+	_paused = pause
+
+	if pause:
+		# stash remaining times and stop timers
+		_spawn_remaining = _spawn_timer.time_left
+		_between_remaining = _between.time_left
+		_spawn_timer.stop()
+		_between.stop()
+	else:
+		# resume any pending timers using the stashed remaining time
+		if _between_remaining > 0.0:
+			_between.start(_between_remaining)
+			_between_remaining = 0.0
+		elif _spawn_remaining > 0.0 and _to_spawn_in_wave > 0:
+			_spawn_timer.start(_spawn_remaining)
+			_spawn_remaining = 0.0
+		else:
+			# nothing pending; if we're mid-wave with spawns left, schedule next
+			if _to_spawn_in_wave > 0 and _spawn_timer.is_stopped():
+				_schedule_next_spawn()

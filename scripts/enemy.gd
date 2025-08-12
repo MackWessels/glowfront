@@ -10,6 +10,7 @@ extends CharacterBody3D
 @export var knockback_max: float = 8.0
 
 const ENTRY_RADIUS_DEFAULT: float = 0.20
+const EPS: float = 0.0001
 
 var _board: Node = null
 var _knockback: Vector3 = Vector3.ZERO
@@ -32,7 +33,6 @@ func _ready() -> void:
 	else:
 		_board = null
 	add_to_group("enemy")
-
 
 func set_paused(p: bool) -> void:
 	_paused = p
@@ -82,7 +82,7 @@ func _physics_process(delta: float) -> void:
 			_entry_active = false
 		else:
 			var target_vel: Vector3 = Vector3.ZERO
-			if dist > 0.0001:
+			if dist > EPS:
 				target_vel = to_entry.normalized() * speed
 			_move_horiz_toward(target_vel, delta)
 			return
@@ -94,8 +94,8 @@ func _physics_process(delta: float) -> void:
 		queue_free()
 		return
 
-	# Flow-field drive
-	var dir: Vector3 = _board.get_dir_for_world(global_position)
+	# Flow-field drive (from board data)
+	var dir: Vector3 = _get_flow_dir()
 	var target_vel: Vector3 = Vector3.ZERO
 	if dir != Vector3.ZERO:
 		target_vel = dir * speed
@@ -119,37 +119,51 @@ func _move_horiz_toward(target_vel: Vector3, delta: float) -> void:
 	_apply_y_lock()
 	move_and_slide()
 
-	# Decay knockback
-	if _knockback.length() > 0.0:
-		_knockback = _knockback.move_toward(Vector3.ZERO, knockback_decay * delta)
-
 func _apply_y_lock() -> void:
 	if _y_lock_enabled and _y_plane_set:
-		if abs(global_position.y - _y_plane) > 0.0001:
+		if abs(global_position.y - _y_plane) > EPS:
 			var p: Vector3 = global_position
 			p.y = _y_plane
 			global_position = p
 
-# Knockback 
-func apply_knockback_from(source_world: Vector3, force: float) -> void:
-	# ignore during entry
-	if _entry_active:
-		return
-	var dir: Vector3 = global_position - source_world
-	dir.y = 0.0
-	if dir.length() > 0.0001:
-		dir = dir.normalized()
-		_knockback += dir * force
-		if _knockback.length() > knockback_max:
-			_knockback = _knockback.normalized() * knockback_max
 
-func apply_knockback_dir(direction_world: Vector3, force: float) -> void:
-	if _entry_active:
-		return
-	var dir: Vector3 = direction_world
-	dir.y = 0.0
-	if dir.length() > 0.0001:
-		dir = dir.normalized()
-		_knockback += dir * force
-		if _knockback.length() > knockback_max:
-			_knockback = _knockback.normalized() * knockback_max
+func _get_flow_dir() -> Vector3:
+	# Safety
+	if _board == null:
+		return Vector3.ZERO
+
+	# Current cell & goal cell
+	var pos: Vector2i = _board.world_to_cell(global_position)
+	var goal_cell: Vector2i = _board.world_to_cell(_board.get_goal_position())
+
+	# If we're on the goal cell, steer straight to the goal point
+	if pos == goal_cell:
+		var v_goal: Vector3 = _board.get_goal_position() - global_position
+		v_goal.y = 0.0
+		var Lg: float = v_goal.length()
+		if Lg > EPS:
+			return v_goal / Lg
+		return Vector3.ZERO
+
+	# If current cell is temporarily blue or not walkable, try to escape to best neighbor
+	var standing_blocked: bool = bool(_board.closing.get(pos, false)) or not _board.tiles[pos].is_walkable()
+	if standing_blocked:
+		var best: Vector2i = pos
+		var best_val: int = 1000000
+		for o in _board.ORTHO_DIRS:
+			var nb: Vector2i = pos + o
+			if _board.cost.has(nb):
+				var c: int = int(_board.cost[nb])
+				if c < best_val:
+					best_val = c
+					best = nb
+		if best != pos:
+			var v2: Vector3 = _board.cell_to_world(best) - global_position
+			v2.y = 0.0
+			var L2: float = v2.length()
+			if L2 > EPS:
+				return v2 / L2
+		return Vector3.ZERO
+
+	# Normal case: use precomputed flow-field direction
+	return _board.dir_field.get(pos, Vector3.ZERO)

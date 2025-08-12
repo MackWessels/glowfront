@@ -1,6 +1,8 @@
 extends Node3D
 
-@export var board_size: int = 10
+@export var board_size_x: int = 10
+@export var board_size_z: int = 10
+
 @export var tile_scene: PackedScene
 @export var tile_size: float = 2.0
 @export var goal_node: Node3D
@@ -17,16 +19,15 @@ var active_tile: Node = null
 var cost: Dictionary = {}
 var dir_field: Dictionary = {}
 
-# Pending/blue
+# Pending/blue state
 var closing: Dictionary = {}
 var pending_action: Dictionary = {}
-var _pending_mat_cache: Dictionary = {}
 
 # Grid
 var _grid_origin: Vector3 = Vector3.ZERO
 var _step: float = 1.0
 
-# Shared neighbor offsets
+# Shared neighbor offsets (4-connected)
 const ORTHO_DIRS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0),
 	Vector2i(0, 1), Vector2i(0, -1)
@@ -34,128 +35,108 @@ const ORTHO_DIRS: Array[Vector2i] = [
 
 func _ready() -> void:
 	generate_board()
-
-	var t00: Node3D = tiles.get(Vector2i(0, 0), null)
-	if t00:
-		_grid_origin = t00.global_position
+	var origin_tile = tiles.get(Vector2i(0, 0), null) as Node3D
+	if origin_tile:
+		_grid_origin = origin_tile.global_position
 	_step = tile_size
-
 	position_portal(goal_node, "right")
 	position_portal(spawner_node, "left")
-
 	_recompute_flow()
-	if placement_menu:
-		placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
+	placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
 
+# blue/pending build state
 func _physics_process(_delta: float) -> void:
-	# Finalize any blue/pending tiles once no enemy is standing on them
-	if closing.size() == 0:
+	if closing.is_empty():
 		return
 
-	var to_finalize: Array[Vector2i] = []
-	for k in closing.keys():
-		var cell: Vector2i = k
-		if not _any_enemy_on(cell):
-			to_finalize.append(cell)
+	var changed := false
+	for pos: Vector2i in closing.keys():
+		if _any_enemy_on(pos):
+			continue
+		if pending_action.has(pos) and tiles.has(pos):
+			tiles[pos].set_pending_blue(false)
+			tiles[pos].apply_placement(pending_action[pos])
+			pending_action.erase(pos)
+			closing.erase(pos)
+			changed = true
 
-	for c: Vector2i in to_finalize:
-		if pending_action.has(c) and tiles.has(c):
-			_clear_pending_visual(tiles[c])
-			var action: String = pending_action[c]
-			pending_action.erase(c)
-			closing.erase(c)
-			tiles[c].apply_placement(action)
-			_recompute_flow()
-			emit_signal("global_path_changed")
+	if changed:
+		_recompute_flow()
+		emit_signal("global_path_changed")
 
-# Board generation / portals
+# Board generation
 func generate_board() -> void:
-	for x in board_size:
-		for z in board_size:
-			var tile := tile_scene.instantiate()
-			if tile is Node3D:
-				var t3d := tile as Node3D
-				t3d.global_position = Vector3(x * tile_size, 0, z * tile_size)
-			tile.grid_x = x
-			tile.grid_z = z
+	for x in board_size_x:
+		for z in board_size_z:
+			var tile = tile_scene.instantiate()
+			add_child(tile)
+
+			var pos = Vector2i(x, z)
+			tile.position = Vector3(x * tile_size, 0.0, z * tile_size)
+			tile.grid_position = pos
 			tile.tile_board = self
 			tile.placement_menu = placement_menu
-			add_child(tile)
-			tiles[Vector2i(x, z)] = tile
+
+			tiles[pos] = tile
 
 func position_portal(portal: Node3D, side: String) -> void:
-	var tile_pos := Vector2i()
+	var mid_x = board_size_x >> 1
+	var mid_z = board_size_z >> 1
+
+	var pos: Vector2i
 	var rotation_y := 0.0
 	match side:
 		"left":
-			tile_pos = Vector2i(0, board_size / 2); rotation_y = deg_to_rad(90)
+			pos = Vector2i(0, mid_z);                 rotation_y = PI / 2
 		"right":
-			tile_pos = Vector2i(board_size - 1, board_size / 2); rotation_y = deg_to_rad(-90)
+			pos = Vector2i(board_size_x - 1, mid_z);  rotation_y = -PI / 2
 		"top":
-			tile_pos = Vector2i(board_size / 2, 0); rotation_y = deg_to_rad(0)
+			pos = Vector2i(mid_x, 0);                 rotation_y = 0.0
 		"bottom":
-			tile_pos = Vector2i(board_size / 2, board_size - 1); rotation_y = deg_to_rad(180)
-	var tile = tiles.get(tile_pos)
-	if tile and tile is Node3D:
-		var t3d := tile as Node3D
-		portal.global_position = t3d.global_position
-		portal.rotation.y = rotation_y
+			pos = Vector2i(mid_x, board_size_z - 1);  rotation_y = PI
+
+	var tile = tiles[pos] as Node3D
+	portal.global_position = tile.global_position
+	portal.rotation.y = rotation_y
 
 # For spawner/enemies
 func get_spawn_position() -> Vector3: return spawner_node.global_position
 func get_goal_position() -> Vector3:  return goal_node.global_position
 
-# Grid helpers
-func in_bounds(cell: Vector2i) -> bool:
-	return cell.x >= 0 and cell.x < board_size and cell.y >= 0 and cell.y < board_size
+# translate grid <-> world
+func cell_to_world(pos: Vector2i) -> Vector3:
+	return _grid_origin + Vector3(pos.x * _step, 0.0, pos.y * _step)
 
-func is_blocked(cell: Vector2i) -> bool:
-	if not in_bounds(cell):
-		return true
-	# Blue/pending tiles are treated as blocked for routing
-	if closing.get(cell, false):
-		return true
-	if tiles.has(cell):
-		var t = tiles[cell]
-		if t and t.has_method("is_walkable"):
-			return not t.is_walkable()
-	return true
+func world_to_cell(world_pos: Vector3) -> Vector2i:
+	var gx := roundi((world_pos.x - _grid_origin.x) / _step)
+	var gz := roundi((world_pos.z - _grid_origin.z) / _step)
+	return Vector2i(clamp(gx, 0, board_size_x - 1), clamp(gz, 0, board_size_z - 1))
 
-func cell_to_world(cell: Vector2i) -> Vector3:
-	return Vector3(
-		_grid_origin.x + float(cell.x) * _step,
-		_grid_origin.y,
-		_grid_origin.z + float(cell.y) * _step
-	)
-
-func world_to_cell(pos: Vector3) -> Vector2i:
-	var x: int = int(round((pos.x - _grid_origin.x) / _step))
-	var z: int = int(round((pos.z - _grid_origin.z) / _step))
-	return Vector2i(clamp(x, 0, board_size - 1), clamp(z, 0, board_size - 1))
-
-# Flow-field
 func _goal_cell() -> Vector2i:
 	return world_to_cell(goal_node.global_position)
 
 func _recompute_flow() -> bool:
-	var new_cost: Dictionary = {}
-	var new_dir: Dictionary = {}
+	var new_cost = {}
+	var new_dir = {}
 
 	var goal_cell: Vector2i  = _goal_cell()
 	var spawn_cell: Vector2i = world_to_cell(spawner_node.global_position)
 
 	var q: Array[Vector2i] = []
-	if in_bounds(goal_cell) and not is_blocked(goal_cell):
+	# Seed from goal if the goal tile exists, isn't blue, and is walkable.
+	if tiles.has(goal_cell) and not closing.get(goal_cell, false) and tiles[goal_cell].is_walkable():
 		new_cost[goal_cell] = 0
 		q.append(goal_cell)
 
+	# BFS over 4-neighbors
 	while q.size() > 0:
 		var cur: Vector2i = q.pop_front()
-		var cur_cost: int = new_cost[cur]
+		var cur_cost: int = int(new_cost[cur])
 		for o: Vector2i in ORTHO_DIRS:
 			var nb: Vector2i = cur + o
-			if not in_bounds(nb) or is_blocked(nb):
-				continue
+			if not tiles.has(nb): continue
+			if closing.get(nb, false): continue
+			if not tiles[nb].is_walkable(): continue
 			if not new_cost.has(nb):
 				new_cost[nb] = cur_cost + 1
 				q.append(nb)
@@ -164,271 +145,196 @@ func _recompute_flow() -> bool:
 	if not new_cost.has(spawn_cell):
 		return false
 
-	# Directions toward lowest-cost neighbor
-	for x in board_size:
-		for z in board_size:
-			var g := Vector2i(x, z)
-			if not new_cost.has(g):
-				continue
-			var best := g
-			var best_val: int = new_cost[g]
-			for o2: Vector2i in ORTHO_DIRS:
+	# Build directions only for reachable cells
+	var goal_world = goal_node.global_position
+	var eps := 0.0001
+
+	for key in new_cost.keys():
+		var g: Vector2i = key as Vector2i
+		var dir_vec: Vector3 = Vector3.ZERO
+
+		if g == goal_cell:
+			dir_vec = goal_world - cell_to_world(g)
+			dir_vec.y = 0.0
+			var L0: float = dir_vec.length()
+			if L0 > eps:
+				dir_vec = dir_vec / L0
+		else:
+			var best: Vector2i = g
+			var best_val: int = int(new_cost[g])
+			for o2 in ORTHO_DIRS:
 				var nb2: Vector2i = g + o2
-				if new_cost.has(nb2) and new_cost[nb2] < best_val:
-					best_val = new_cost[nb2]
+				if new_cost.has(nb2) and int(new_cost[nb2]) < best_val:
+					best_val = int(new_cost[nb2])
 					best = nb2
-			var dir_vec: Vector3 = Vector3.ZERO
-			if g == goal_cell:
-				dir_vec = goal_node.global_position - cell_to_world(g)
-				dir_vec.y = 0.0
-				if dir_vec.length() > 0.0001:
-					dir_vec = dir_vec.normalized()
-			elif best != g:
-				var a: Vector3 = cell_to_world(g)
-				var b: Vector3 = cell_to_world(best)
-				dir_vec = b - a
-				dir_vec.y = 0.0
-				if dir_vec.length() > 0.0001:
-					dir_vec = dir_vec.normalized()
-			new_dir[g] = dir_vec
+
+			if best != g:
+				var from: Vector3 = cell_to_world(g)
+				var to: Vector3 = cell_to_world(best)
+				var d: Vector3 = to - from
+				d.y = 0.0
+				var L: float = d.length()
+				if L > eps:
+					dir_vec = d / L
+
+		new_dir[g] = dir_vec
 
 	cost = new_cost
 	dir_field = new_dir
 	return true
-
-func get_dir_for_world(world_pos: Vector3) -> Vector3:
-	var g: Vector2i = world_to_cell(world_pos)
-	if g == _goal_cell():
-		var v_goal: Vector3 = goal_node.global_position - world_pos
-		v_goal.y = 0.0
-		if v_goal.length() > 0.0001:
-			return v_goal.normalized()
-		return Vector3.ZERO
-
-	# If standing on a blocked/pending tile, escape to best neighbor
-	if is_blocked(g):
-		var best := g
-		var best_val := 1000000
-		for o: Vector2i in ORTHO_DIRS:
-			var nb := g + o
-			if cost.has(nb) and cost[nb] < best_val:
-				best_val = cost[nb]
-				best = nb
-		if best != g:
-			var v2: Vector3 = cell_to_world(best) - world_pos
-			v2.y = 0.0
-			if v2.length() > 0.0001:
-				return v2.normalized()
-		return Vector3.ZERO
-
-	return dir_field.get(g, Vector3.ZERO)
 
 # Placement / pending flow
 func _on_place_selected(action: String) -> void:
 	if active_tile == null or not is_instance_valid(active_tile):
 		return
 
-	var coords: Vector2i = active_tile.grid_position
-	var blocks: bool = (action == "turret" or action == "wall")
+	var pos: Vector2i = active_tile.grid_position
+	var blocks := (action == "turret" or action == "wall")
 
 	# Non-blocking actions
 	if not blocks:
-		if closing.has(coords):
-			closing.erase(coords)
-		if pending_action.has(coords):
-			pending_action.erase(coords)
-		if tiles.has(coords):
-			_set_pending_visual(tiles[coords], false)
+		if closing.has(pos): closing.erase(pos)
+		if pending_action.has(pos): pending_action.erase(pos)
+		if tiles.has(pos): tiles[pos].set_pending_blue(false)
 		active_tile.apply_placement(action)
-		_recompute_flow()
-		emit_signal("global_path_changed")
+		if _recompute_flow():
+			emit_signal("global_path_changed")
 		active_tile = null
 		return
 
-	if _any_enemy_on(coords):
-		closing[coords] = true
-		pending_action[coords] = action
-		_set_pending_visual(tiles[coords], true)
+	# Blocking actions (turret/wall)
+	if _any_enemy_on(pos):
+		# Mark blue + defer finalization to _physics_process
+		closing[pos] = true
+		pending_action[pos] = action
+		tiles[pos].set_pending_blue(true)
 
-		# Recompute with the tile treated as blocked
-		var path_ok: bool = _recompute_flow()
+		var path_ok := _recompute_flow()
 		emit_signal("global_path_changed")
 
-		# If path becomes disconnected, handle the edge (no shooting)
+		# If the block disconnects the path, run the edge handler (no shooting)
 		if not path_ok:
-			await _edge_wait_enemy_off_then_break(coords)
+			await _wait_enemy_clear_then_break(pos)
 		active_tile = null
 		return
 
-	closing[coords] = true
-	pending_action[coords] = action
-	_set_pending_visual(tiles[coords], true)
-	_recompute_flow()
-	emit_signal("global_path_changed")
+	# No enemy on the tile: place immediately
+	closing[pos] = true
+	pending_action[pos] = action
+	tiles[pos].set_pending_blue(true)
 
 	active_tile.apply_placement(action)
-	var ok: bool = _recompute_flow()
+	var ok := _recompute_flow()
 	if not ok:
 		await _soft_block_sequence(active_tile, action, true)
 	else:
-		_clear_pending_visual(tiles[coords])
-		closing.erase(coords)
-		pending_action.erase(coords)
+		tiles[pos].set_pending_blue(false)
+		closing.erase(pos)
+		pending_action.erase(pos)
 		emit_signal("global_path_changed")
-
 	active_tile = null
 
-func _any_enemy_on(cell: Vector2i) -> bool:
-	var center: Vector3 = cell_to_world(cell)
-	var half: float = _step * 0.49
-	var min_x: float = center.x - half
-	var max_x: float = center.x + half
-	var min_z: float = center.z - half
-	var max_z: float = center.z + half
+func _any_enemy_on(pos: Vector2i) -> bool:
+	var center = cell_to_world(pos)
+	var half = _step * 0.49
+	var min_x = center.x - half
+	var max_x = center.x + half
+	var min_z = center.z - half
+	var max_z = center.z + half
 
-	for e in get_tree().get_nodes_in_group("enemy"):
-		var px: float = e.global_position.x
-		var pz: float = e.global_position.z
-		if px >= min_x and px <= max_x and pz >= min_z and pz <= max_z:
+	for e: Node3D in get_tree().get_nodes_in_group("enemy"):
+		var p = e.global_position
+		if p.x >= min_x and p.x <= max_x and p.z >= min_z and p.z <= max_z:
 			return true
 	return false
 
-func _set_pending_visual(tile: Node, on: bool) -> void:
-	var mesh: MeshInstance3D = _find_mesh(tile)
-	if mesh == null:
-		return
-
-	if on:
-		if not _pending_mat_cache.has(mesh):
-			_pending_mat_cache[mesh] = mesh.material_override
-		var m := StandardMaterial3D.new()
-		m.albedo_color = Color(0.25, 0.55, 1.0) # blue
-		m.metallic = 0.0
-		m.roughness = 1.0
-		mesh.material_override = m
-	else:
-		_clear_pending_visual(tile)
-
-func _clear_pending_visual(tile: Node) -> void:
-	var mesh: MeshInstance3D = _find_mesh(tile)
-	if mesh == null:
-		return
-	if _pending_mat_cache.has(mesh):
-		mesh.material_override = _pending_mat_cache[mesh]
-		_pending_mat_cache.erase(mesh)
-
-func _find_mesh(node: Node) -> MeshInstance3D:
-	if node is MeshInstance3D:
-		return node as MeshInstance3D
-	for c in node.get_children():
-		if c is MeshInstance3D:
-			return c as MeshInstance3D
-	return null
-
-# reachability / pause helpers 
+# reachability / pause helper
 func _cells_reachable_from(start: Vector2i) -> Dictionary:
-	var seen := {}
-	if not in_bounds(start) or is_blocked(start):
+	var seen: Dictionary = {}
+
+	# Start must exist, not be blue/pending, and be walkable
+	if not tiles.has(start) or closing.has(start) or not tiles[start].is_walkable():
 		return seen
+
 	var q: Array[Vector2i] = [start]
 	seen[start] = true
+
 	while q.size() > 0:
 		var cur: Vector2i = q.pop_front()
-		for o in ORTHO_DIRS:
+		for o: Vector2i in ORTHO_DIRS:
 			var nb: Vector2i = cur + o
-			if not in_bounds(nb) or is_blocked(nb):
-				continue
-			if not seen.has(nb):
-				seen[nb] = true
-				q.push_back(nb)
+			if not tiles.has(nb): continue       # out of bounds/missing
+			if closing.has(nb): continue         # temporarily blocked (blue)
+			if not tiles[nb].is_walkable(): continue
+			if seen.has(nb): continue           
+			seen[nb] = true
+			q.push_back(nb)
 	return seen
 
-func _pause_enemies_subset(reach: Dictionary, p: bool) -> Array:
-	var paused := []
-	for e in get_tree().get_nodes_in_group("enemy"):
-		var c := world_to_cell(e.global_position)
-		if reach.has(c):
-			if e.has_method("set_paused"):
-				e.set_paused(p)
-			if e is Node:
-				e.set_physics_process(not p)
-			paused.append(e)
-	return paused
+func _pause_enemies_subset(reach: Dictionary, pause: bool) -> Array[Node]:
+	var affected: Array[Node] = []
+	for e: Node3D in get_tree().get_nodes_in_group("enemy"):
+		if reach.has(world_to_cell(e.global_position)):
+			e.set_paused(pause)
+			e.set_physics_process(not pause)
+			affected.append(e)
+	return affected
 
-func _pause_spawner(p: bool) -> void:
-	if enemy_spawner == null:
-		return
-	# Prefer the spawner's API if present
-	if enemy_spawner.has_method("pause_spawning"):
-		enemy_spawner.pause_spawning(p)
-		return
-	# Fallback to a child Timer named "Timer" (legacy)
-	if enemy_spawner.has_node("Timer"):
-		var t: Timer = enemy_spawner.get_node("Timer")
-		if p:
-			t.stop()
-		else:
-			t.start()
 
-func _edge_wait_enemy_off_then_break(cell: Vector2i) -> void:
-	# Pause upstream enemies/spawner with the BLUE (blocked) cell in place
+func _wait_enemy_clear_then_break(pos: Vector2i) -> void:
+	# Pause upstream enemies + spawner with the BLUE (blocked) cell in place
 	var spawn_cell: Vector2i = world_to_cell(spawner_node.global_position)
-	var reach: Dictionary = _cells_reachable_from(spawn_cell)
-	_pause_spawner(true)
+	var reach := _cells_reachable_from(spawn_cell)
+	enemy_spawner.pause_spawning(true)
 	var paused: Array = _pause_enemies_subset(reach, true)
 
 	# Let the enemy currently on the tile pass
-	while _any_enemy_on(cell):
+	while _any_enemy_on(pos):
 		await get_tree().process_frame
 
 	# Clear blue and break the tile (no shooting)
-	var tile: Node = tiles.get(cell, null)
+	var tile = tiles.get(pos, null)
 	if tile:
-		_clear_pending_visual(tile)
-	closing.erase(cell)
-	pending_action.erase(cell)
-
-	if tile and tile.has_method("break_tile"):
-		tile.break_tile()
-
+		tile.set_pending_blue(false)
+	closing.erase(pos)
+	pending_action.erase(pos)
+	tile.break_tile()
 	_recompute_flow()
 	emit_signal("global_path_changed")
 
-	# Resume only those paused
+	# Resume only those we paused
 	for e in paused:
 		if is_instance_valid(e):
-			if e.has_method("set_paused"):
-				e.set_paused(false)
-			if e is Node:
-				e.set_physics_process(true)
-	_pause_spawner(false)
+			e.set_paused(false)
+			e.set_physics_process(true)
+
+	enemy_spawner.pause_spawning(false)
+
 
 func _soft_block_sequence(tile: Node, action: String, already_placed: bool) -> void:
+	# If not placed yet, place so routing reflects the block.
 	if not already_placed:
 		tile.apply_placement(action)
 		_recompute_flow()
 
-	_pause_spawner(true)
+	# Pause spawns + only the upstream enemies
+	enemy_spawner.pause_spawning(true)
 
-	# Compute upstream region with the block present, pause only those enemies
 	var spawn_cell: Vector2i = world_to_cell(spawner_node.global_position)
 	var reach: Dictionary = _cells_reachable_from(spawn_cell)
 	var paused: Array = _pause_enemies_subset(reach, true)
 
-	# Shoot, Sync the break to the projectile flight time.
+	# Fire the breaker shot and wait for its flight time
 	var wait_t: float = 1.0
-	if enemy_spawner and enemy_spawner.has_method("shoot_tile"):
+	if enemy_spawner.has_method("shoot_tile"):
 		wait_t = float(enemy_spawner.shoot_tile(tile.global_position))
-
 	await get_tree().create_timer(wait_t).timeout
 
-	# Clear blue pending on this tile, then break it
-	_clear_pending_visual(tile)
-	var cell: Vector2i = world_to_cell(tile.global_position)
-	if closing.has(cell):
-		closing.erase(cell)
-	if pending_action.has(cell):
-		pending_action.erase(cell)
+	# Clear blue state and break the tile
+	tile.set_pending_blue(false)
+	var pos: Vector2i = world_to_cell(tile.global_position)
+	if closing.has(pos): closing.erase(pos)
+	if pending_action.has(pos): pending_action.erase(pos)
 
 	if tile.has_method("break_tile"):
 		tile.break_tile()
@@ -436,11 +342,10 @@ func _soft_block_sequence(tile: Node, action: String, already_placed: bool) -> v
 	_recompute_flow()
 	emit_signal("global_path_changed")
 
-	# Resume only those paused
+	# Resume only those paused, and resume spawning
 	for e in paused:
 		if is_instance_valid(e):
-			if e.has_method("set_paused"):
-				e.set_paused(false)
-			if e is Node:
-				e.set_physics_process(true)
-	_pause_spawner(false)
+			e.set_paused(false)
+			e.set_physics_process(true)
+
+	enemy_spawner.pause_spawning(false)

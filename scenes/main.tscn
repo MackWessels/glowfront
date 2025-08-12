@@ -1,8 +1,7 @@
-[gd_scene load_steps=7 format=3 uid="uid://b8msl4kqjlhan"]
+[gd_scene load_steps=6 format=3 uid="uid://b8msl4kqjlhan"]
 
 [ext_resource type="Script" uid="uid://43uec7mcm20v" path="res://scripts/main.gd" id="1_0wfyh"]
 [ext_resource type="PackedScene" uid="uid://b3dnbvtjgt0fw" path="res://scenes/tile_board.tscn" id="3_jyhfs"]
-[ext_resource type="PackedScene" uid="uid://bejcwxqtu5216" path="res://scenes/tile.tscn" id="3_sugp2"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7dm0k"]
 sky_top_color = Color(0.517647, 0.788235, 1, 1)
@@ -32,4 +31,3 @@ light_energy = 0.7
 environment = SubResource("Environment_7dm0k")
 
 [node name="TileBoard" parent="." instance=ExtResource("3_jyhfs")]
-tile_scene = ExtResource("3_sugp2")
