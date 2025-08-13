@@ -7,3 +7,4 @@ res://scenes/enemy.tscn
 res://scenes/placement_menu.tscn
 res://scenes/tower.tscn
 res://scenes/goal.tscn
+res://scripts/enemy.gd
