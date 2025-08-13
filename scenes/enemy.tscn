@@ -20,10 +20,12 @@ script = ExtResource("1_7p1mj")
 
 [node name="BaseCollider" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.00418091, 0)
+visible = false
 shape = SubResource("CylinderShape3D_md0e3")
 
 [node name="DomeCollider" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.168067, 0)
+visible = false
 shape = SubResource("SphereShape3D_4ra3w")
 
 [node name="UFO" parent="." instance=ExtResource("2_md0e3")]
