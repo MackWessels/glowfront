@@ -8,3 +8,4 @@ res://scenes/placement_menu.tscn
 res://scenes/tower.tscn
 res://scenes/goal.tscn
 res://scripts/enemy.gd
+res://scripts/tile.gd

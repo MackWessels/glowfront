@@ -3,7 +3,6 @@ extends StaticBody3D
 @export var turret_scene: PackedScene
 @export var wall_scene: PackedScene
 @export var placement_menu: PopupMenu
-@onready var crack_overlay = $CrackOverlay
 @onready var _tile_mesh: MeshInstance3D = $"TileMesh"
 var _orig_mat: Material = null
 
@@ -86,7 +85,6 @@ func place_turret():
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
-	_show_crack(false)
 
 func place_wall():
 	if is_broken or wall_scene == null:
@@ -101,7 +99,6 @@ func place_wall():
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
-	_show_crack(false)
 
 func set_wall(value: bool):
 	is_wall = value
@@ -122,7 +119,6 @@ func break_tile():
 	is_broken = true
 	_clear_existing_object()
 	set_pending_blue(false)
-	_show_crack(true)
 	_tint_tile_red()
 
 func repair_tile():
@@ -131,7 +127,6 @@ func repair_tile():
 	is_wall = false
 	has_turret = false
 	set_pending_blue(false)
-	_show_crack(false)
 	_restore_tile_material()
 
 func _clear_existing_object() -> void:
@@ -139,9 +134,6 @@ func _clear_existing_object() -> void:
 		placed_object.queue_free()
 	placed_object = null
 
-func _show_crack(v: bool) -> void:
-	if is_instance_valid(crack_overlay):
-		crack_overlay.visible = v
 
 func _tint_tile_red() -> void:
 	if is_instance_valid(_tile_mesh):
