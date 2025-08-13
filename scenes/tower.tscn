@@ -110,7 +110,7 @@ shadow_mesh = SubResource("ArrayMesh_dd7d4")
 [sub_resource type="BoxShape3D" id="BoxShape3D_ay4al"]
 size = Vector3(2, 1.31686, 2)
 
-[node name="Tower" type="Node3D"]
+[node name="Tower" type="Node3D" groups=["turrets"]]
 script = ExtResource("1_2x682")
 projectile_scene = ExtResource("2_ay4al")
 
@@ -140,8 +140,8 @@ transform = Transform3D(0.707107, -0.707107, 0, 0.707107, 0.707107, 0, 0, 0, 1, 
 
 [node name="DetectionArea" type="Area3D" parent="."]
 visible = false
-collision_layer = 4
-collision_mask = 0
+collision_layer = 0
+collision_mask = 4
 input_ray_pickable = false
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="DetectionArea"]

@@ -8,6 +8,8 @@
 
 [node name="Projectile" type="Area3D"]
 transform = Transform3D(0.3, 0, 0, 0, 0.3, 0, 0, 0, 0.3, 0, 0, 0)
+collision_layer = 0
+collision_mask = 4
 script = ExtResource("1_c8fcr")
 speed = 20.0
 lifetime = 5.0

@@ -1,12 +1,18 @@
 extends CharacterBody3D
 
-@export var speed: float = 4.0
-@export var acceleration: float = 18.0
+# --- movement ---
+@export var speed: float = 2.0
+@export var acceleration: float = 15.0
 @export var max_speed: float = 6.0
 @export var goal_radius: float = 0.6
 @export var tile_board_path: NodePath
 @export var knockback_decay: float = 6.0
 @export var knockback_max: float = 8.0
+
+# --- health ---
+@export var max_health: int = 3
+var health: int = 0
+signal died
 
 # constants 
 const ENTRY_RADIUS_DEFAULT: float = 0.20
@@ -17,6 +23,7 @@ const EPS: float = 0.0001
 var _board: Node = null
 var _knockback: Vector3 = Vector3.ZERO
 var _paused: bool = false
+var _dead: bool = false
 
 # Y-plane lock
 var _y_lock_enabled: bool = true
@@ -32,6 +39,9 @@ func _ready() -> void:
 	motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
 	floor_snap_length = 0.0
 
+	# init health
+	health = max_health
+
 	if tile_board_path != NodePath(""):
 		var n := get_node_or_null(tile_board_path)
 		if n:
@@ -43,13 +53,28 @@ func _ready() -> void:
 		_y_plane = global_position.y
 		_y_plane_set = true
 
-	add_to_group("enemy", true)
-
+	# IMPORTANT: group matches your tower's "enemies" check
+	add_to_group("enemies", true)
 
 func set_paused(p: bool) -> void:
 	_paused = p
 
+# --- damage / death API ---
+func take_damage(amount: int) -> void:
+	if _dead:
+		return
+	health -= amount
+	if health <= 0:
+		_die()
 
+func _die() -> void:
+	if _dead:
+		return
+	_dead = true
+	emit_signal("died")
+	queue_free()
+
+# --- helpers ---
 func lock_y_to(y: float) -> void:
 	_y_plane = y
 	_y_plane_set = true
@@ -63,10 +88,8 @@ func lock_y_to(y: float) -> void:
 	if abs(velocity.y) > EPS:
 		velocity.y = 0.0
 
-
 func set_entry_point(p: Vector3) -> void:
 	set_entry_target(p, ENTRY_RADIUS_DEFAULT)
-
 
 func set_entry_target(p: Vector3, radius: float) -> void:
 	if _y_lock_enabled and _y_plane_set:
@@ -84,8 +107,10 @@ func set_entry_target(p: Vector3, radius: float) -> void:
 	var r: float = _entry_radius + EPS
 	_entry_active = to_entry.length_squared() > r * r
 
-
 func _physics_process(delta: float) -> void:
+	if _dead:
+		return
+
 	# paused or no board
 	if _paused or _board == null:
 		velocity.x = 0.0
@@ -116,11 +141,11 @@ func _physics_process(delta: float) -> void:
 			return
 
 	# goal check
-	var goal_pos: Vector3 = _board.get_goal_position()        
-	var to_goal: Vector3 = goal_pos - global_position         
+	var goal_pos: Vector3 = _board.get_goal_position()
+	var to_goal: Vector3 = goal_pos - global_position
 	to_goal.y = 0.0
 	if to_goal.length_squared() <= goal_radius * goal_radius:
-		queue_free()
+		_die()
 		return
 
 	# flow-field drive
@@ -130,7 +155,6 @@ func _physics_process(delta: float) -> void:
 		target_vel = dir * speed
 
 	_move_horizontal_toward(target_vel, delta)
-
 
 func _move_horizontal_toward(target_vel: Vector3, delta: float) -> void:
 	# horizontal = steering + knockback
@@ -155,7 +179,6 @@ func _move_horizontal_toward(target_vel: Vector3, delta: float) -> void:
 
 	_apply_y_lock()
 	move_and_slide()
-
 
 func _apply_y_lock() -> void:
 	if _y_lock_enabled and _y_plane_set:
@@ -195,7 +218,7 @@ func _get_flow_dir() -> Vector3:
 	# If current cell is temporarily blue or not walkable, escape to best neighbor
 	var standing_blocked: bool = bool(_board.closing.get(pos, false))
 	if not standing_blocked:
-		var tile: Node = _board.tiles.get(pos) 
+		var tile: Node = _board.tiles.get(pos)
 		if tile and tile.has_method("is_walkable"):
 			standing_blocked = not tile.is_walkable()
 
