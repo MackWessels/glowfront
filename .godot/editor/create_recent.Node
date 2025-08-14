@@ -1,7 +1,7 @@
 CollisionShape3D
+CharacterBody3D
 StaticBody3D
 Node3D
-CharacterBody3D
 Node
 Area3D
 PathFollow3D

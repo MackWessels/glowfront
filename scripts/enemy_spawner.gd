@@ -1,38 +1,38 @@
-# EnemySpawner.gd — pool-based, crowd-gated waves
 extends Node3D
 
 @export var enemy_scene: PackedScene
 @export var tile_board_path: NodePath = ^".."
 
-# ---------- Pool / population ----------
+#  Pool / population 
 @export var pool_size: int = 24
 @export var max_active: int = 16
-@export var entry_crowd_limit: int = 2
+@export var entry_crowd_limit: int = 2  
 
-# ---------- Wave settings ----------
+#  Wave settings 
 @export var auto_start: bool = true
-@export var intermission: float = 4.0        # seconds between waves
-@export var wave_size_base: int = 8          # wave 1 size
-@export var wave_size_inc: int = 1           # +N each wave
-@export var wave_first_spawn_delay: float = 0.35  # delay before first spawn in each wave
-@export var spawn_gap: float = 0.2          # spacing between spawns within a wave (0 = none)
+@export var intermission: float = 4.0
+@export var wave_size_base: int = 8
+@export var wave_size_inc: int = 1
+@export var wave_first_spawn_delay: float = 0.35
+@export var spawn_gap: float = 0.2
 
-
-@export var hp_growth_per_wave: float = 1.10   # 10% more HP per wave
+@export var hp_growth_per_wave: float = 1.10
 @export var speed_growth_per_wave: float = 1.02
 
-# ---------- Spawn placement tuning ----------
-const ENTRY_OFFSET: float            = 1.2
-const ENTRY_DEPTH_FACTOR: float      = 0.12
-const LATERAL_JITTER_FACTOR: float   = 0.22
-const LATERAL_JITTER_MIN: float      = 0.10
-const LATERAL_JITTER_MAX: float      = 0.45
+# Spawn placement tuning 
 
-# ---------- Signals ----------
+const ENTRY_MARGIN: float           = 0.18
+const LATERAL_JITTER_RATIO: float   = 0.20
+const LATERAL_JITTER_MIN: float     = 0.06
+const LATERAL_JITTER_MAX: float     = 0.35
+const SPAWN_BEHIND_TILE_RATIO: float = 0.65
+const ENTRY_DEPTH_TILE_RATIO: float  = 0.3
+
+#  Signals 
 signal wave_started(wave: int, size: int)
 signal wave_cleared(wave: int)
 
-# ---------- Internals ----------
+# Internals 
 var _board: Node3D = null
 var _pool: Array[CharacterBody3D] = []
 var _active: Array[CharacterBody3D] = []
@@ -50,7 +50,10 @@ var _spawn_cooldown: float = 0.0
 func _ready() -> void:
 	randomize()
 
-	_board = get_node_or_null(tile_board_path) as Node3D
+	if has_node(tile_board_path):
+		var n := get_node(tile_board_path)
+		if n is Node3D:
+			_board = n as Node3D
 	if _board == null:
 		push_error("EnemySpawner: tile_board_path is invalid or missing.")
 		return
@@ -61,18 +64,16 @@ func _ready() -> void:
 
 	_build_pool()
 
+	_state = BETWEEN
 	if auto_start:
-		_state = BETWEEN
-		_between_t = max(0.0, wave_first_spawn_delay)  # delay before wave 1
+		_between_t = float(max(0.0, wave_first_spawn_delay))
 	else:
-		_state = BETWEEN
 		_between_t = 0.0
 
 	set_physics_process(true)
 
-# -------------------------------------------------------------------
+
 # Pool lifecycle
-# -------------------------------------------------------------------
 func _build_pool() -> void:
 	if enemy_scene == null:
 		push_error("EnemySpawner: enemy_scene is null.")
@@ -102,26 +103,30 @@ func _build_pool() -> void:
 		_pool.append(e)
 
 func _acquire_enemy() -> CharacterBody3D:
-	if _pool.size() > 0:
-		return _pool.pop_back()
+	while _pool.size() > 0:
+		var e: CharacterBody3D = _pool.pop_back()
+		if is_instance_valid(e):
+			return e
 
-	var e := enemy_scene.instantiate() as CharacterBody3D
-	if e != null:
+	var e2: CharacterBody3D = enemy_scene.instantiate() as CharacterBody3D
+	if e2 != null:
 		if _board != null:
-			e.set("tile_board_path", _board.get_path())
-		add_child(e)
-		if e.has_signal("released"):
-			e.connect("released", Callable(self, "_on_enemy_released").bind(e))
-		e.tree_exited.connect(Callable(self, "_on_enemy_tree_exited").bind(e))
-		if not e.has_meta("orig_layer"):
-			e.set_meta("orig_layer", e.collision_layer)
-		if not e.has_meta("orig_mask"):
-			e.set_meta("orig_mask", e.collision_mask)
-		_deactivate_enemy(e)
-	return e
+			e2.set("tile_board_path", _board.get_path())
+		add_child(e2)
+		if e2.has_signal("released"):
+			e2.connect("released", Callable(self, "_on_enemy_released").bind(e2))
+		e2.tree_exited.connect(Callable(self, "_on_enemy_tree_exited").bind(e2))
+		if not e2.has_meta("orig_layer"):
+			e2.set_meta("orig_layer", e2.collision_layer)
+		if not e2.has_meta("orig_mask"):
+			e2.set_meta("orig_mask", e2.collision_mask)
+		_deactivate_enemy(e2)
+	return e2
 
 func _release_enemy(e: CharacterBody3D) -> void:
 	if e == null:
+		return
+	if not is_instance_valid(e):
 		return
 	_active.erase(e)
 	_deactivate_enemy(e)
@@ -133,11 +138,13 @@ func _deactivate_enemy(e: CharacterBody3D) -> void:
 	e.set_physics_process(false)
 	e.collision_layer = 0
 	e.collision_mask  = 0
+
 	var park_under: Vector3
 	if _board != null:
 		park_under = _board.global_transform.origin + Vector3(0, -1000.0, 0)
 	else:
 		park_under = global_transform.origin + Vector3(0, -1000.0, 0)
+
 	e.global_position = park_under
 
 func _activate_enemy(e: CharacterBody3D) -> void:
@@ -149,51 +156,50 @@ func _activate_enemy(e: CharacterBody3D) -> void:
 	if e.has_meta("orig_mask"):
 		e.collision_mask  = int(e.get_meta("orig_mask"))
 
-# -------------------------------------------------------------------
+
 # Wave FSM
-# -------------------------------------------------------------------
 func _physics_process(delta: float) -> void:
 	if _paused or _board == null:
 		return
 
+	# Scrub references
 	_active = _active.filter(func(n): return is_instance_valid(n))
+	_pool   = _pool.filter(func(n): return is_instance_valid(n))
 
 	match _state:
 		BETWEEN:
 			if _between_t > 0.0:
 				_between_t -= delta
-				return
-			_start_next_wave()
+			else:
+				_start_next_wave()
 
 		SPAWNING:
 			if _spawn_cooldown > 0.0:
 				_spawn_cooldown -= delta
-				return
-
-			if _to_spawn > 0 and _active.size() < max_active and _entry_has_room():
-				var e := _acquire_enemy()
-				if e != null:
-					_spawn_enemy(e)
-					_to_spawn -= 1
-					_spawn_cooldown = max(0.0, spawn_gap)
-
-			if _to_spawn <= 0:
-				_state = WAITING
+			else:
+				if _to_spawn > 0 and _active.size() < max_active:
+					var lane := _choose_lane_with_room()
+					if lane != 999:
+						var e := _acquire_enemy()
+						if e != null:
+							_spawn_enemy(e, lane)
+							_to_spawn -= 1
+							_spawn_cooldown = float(max(0.0, spawn_gap))
+				if _to_spawn <= 0:
+					_state = WAITING
 
 		WAITING:
-			# when field is clear, go to intermission
 			if _active.is_empty():
 				emit_signal("wave_cleared", _wave)
 				_state = BETWEEN
-				_between_t = max(0.0, intermission)
+				_between_t = float(max(0.0, intermission))
 
-# Start / config
 func _start_next_wave() -> void:
 	_wave += 1
 	_to_spawn = _calc_wave_size(_wave)
 	emit_signal("wave_started", _wave, _to_spawn)
 	_state = SPAWNING
-	_spawn_cooldown = max(0.0, wave_first_spawn_delay)
+	_spawn_cooldown = float(max(0.0, wave_first_spawn_delay))
 
 func _calc_wave_size(w: int) -> int:
 	var steps: int = w - 1
@@ -204,39 +210,155 @@ func _calc_wave_size(w: int) -> int:
 		size = 1
 	return size
 
-# -------------------------------------------------------------------
-# Spawn one enemy (position, facing, entry target)
-# -------------------------------------------------------------------
-func _spawn_enemy(enemy: CharacterBody3D) -> void:
-	var basis := _portal_spawn_basis()
-	var origin: Vector3  = basis[0]
-	var forward: Vector3 = basis[1]
-	var right: Vector3   = basis[2]
 
-	var entry_depth: float = clamp(_ts * ENTRY_DEPTH_FACTOR, 0.08, 0.35)
-	var lateral_amt: float = clamp(_ts * LATERAL_JITTER_FACTOR, LATERAL_JITTER_MIN, LATERAL_JITTER_MAX)
-	var lateral: Vector3 = right * randf_range(-lateral_amt, lateral_amt)
+# Lane selection (TileBoard.get_spawn_gate to get exact three cells)
+func _choose_lane_with_room() -> int:
+	var info: Dictionary = _board.get_spawn_gate(3)
 
-	var entry_world: Vector3 = origin + forward * entry_depth + lateral
-	var arrive_radius: float = max(entry_depth * 1.4, 0.32)
+	var centers: Array = []
+	if info.has("lane_centers"):
+		centers = info["lane_centers"]
+	if centers.is_empty():
+		return 0
 
-	# 1) place first
+	var lanes: Array = []
+	var mid := int(centers.size() / 2)
+	for i in range(centers.size()):
+		var p: Vector3 = centers[i]
+		var c: Vector2i = _board.world_to_cell(p)
+		lanes.append({ "lane": i - mid, "cell": c })
+
+	var nodes_group := get_tree().get_nodes_in_group("enemies")
+	if nodes_group.is_empty():
+		nodes_group = get_tree().get_nodes_in_group("enemy")
+	var nodes: Array = nodes_group
+	if nodes.is_empty():
+		nodes = []
+		for en in _active:
+			nodes.append(en)
+
+	var best_lane := 999
+	var best_basic := 999
+
+	for item in lanes:
+		var lane_i: int = item["lane"]
+		var cell: Vector2i = item["cell"]
+
+		# skip if tile is pending/blue 
+		if _is_tile_blocked_for_spawn(cell):
+			continue
+
+		var basic_count := 0
+		var elite_present := false
+
+		for obj in nodes:
+			var en := obj as Node3D
+			if en == null:
+				continue
+			if not en.visible:
+				continue
+			if _board.world_to_cell(en.global_position) != cell:
+				continue
+
+			var is_elite := false
+			if en.has_meta("elite"):
+				is_elite = bool(en.get_meta("elite"))
+			elif en.has_method("is_elite"):
+				is_elite = bool(en.call("is_elite"))
+
+			if is_elite:
+				elite_present = true
+				break
+			else:
+				basic_count += 1
+				if basic_count >= entry_crowd_limit:
+					break
+
+		if elite_present:
+			continue
+		if basic_count >= entry_crowd_limit:
+			continue
+
+		if basic_count < best_basic:
+			best_basic = basic_count
+			best_lane = lane_i
+		elif basic_count == best_basic and lane_i == 0:
+			best_basic = basic_count
+			best_lane = lane_i
+
+	return best_lane
+
+func _is_tile_blocked_for_spawn(cell: Vector2i) -> bool:
+	var tiles_dict: Dictionary = _board.get("tiles")
+	if not tiles_dict.has(cell):
+		return true
+
+	var closing_dict: Dictionary = _board.get("closing")
+	if closing_dict.has(cell):
+		return true
+
+	var tile: Node = tiles_dict.get(cell, null)
+	if tile == null:
+		return true
+	if tile.has_method("is_walkable"):
+		return not bool(tile.call("is_walkable"))
+	return false
+
+
+# Spawn enemy into a chosen lane
+func _spawn_enemy(enemy: CharacterBody3D, lane_i: int) -> void:
+	var info: Dictionary = _board.get_spawn_gate(3)
+
+	var centers: Array = []
+	if info.has("lane_centers"):
+		centers = info["lane_centers"]
+
+	var forward: Vector3 = Vector3.FORWARD
+	if info.has("forward"):
+		forward = info["forward"]
+
+	var right: Vector3 = Vector3.RIGHT
+	if info.has("lateral"):
+		right = info["lateral"]
+
+	var mid: int = int(centers.size() / 2)
+	var max_index: int = max(0, centers.size() - 1)
+	var idx: int = clampi(mid + lane_i, 0, max_index)
+	var lane_center: Vector3 = _board.get_spawn_position()
+	if not centers.is_empty():
+		lane_center = centers[idx]
+
+	# placement & targets 
+	var half: float = _ts * 0.5
+	var max_lat: float = float(max(0.0, half - ENTRY_MARGIN))
+
+	var jitter_span: float = float(clamp(_ts * LATERAL_JITTER_RATIO, LATERAL_JITTER_MIN, LATERAL_JITTER_MAX))
+	var jitter_limit: float = float(min(max_lat * 0.85, jitter_span))
+	var jitter: Vector3 = right * randf_range(-jitter_limit, jitter_limit)
+
+	# Start OUTSIDE
+	var spawn_back: float = float(clamp(_ts * SPAWN_BEHIND_TILE_RATIO, 0.05, _ts * 1.2))
+	var start_pos: Vector3 = lane_center - forward * spawn_back + jitter
+
+	# Walk to a deep entry target inside the lane
+	var max_depth: float = half - ENTRY_MARGIN
+	var entry_depth: float = float(clamp(_ts * ENTRY_DEPTH_TILE_RATIO, 0.04, max_depth))
+	var entry_world: Vector3 = lane_center + forward * entry_depth + jitter
+	var arrive_radius: float = float(clamp(_ts * 0.25, 0.08, entry_depth * 0.6))
+
+	# place first at the spawner side
 	var s: Vector3 = enemy.scale
-	var start_pos: Vector3 = origin - forward * ENTRY_OFFSET + lateral
 	enemy.global_position = start_pos
 	enemy.look_at(start_pos + forward, Vector3.UP)
 	enemy.scale = s
 	if enemy.has_method("lock_y_to"):
-		enemy.call("lock_y_to", origin.y)
+		enemy.call("lock_y_to", lane_center.y)
 
-	# Optional wave scaling (works if your enemy has these properties)
 	_apply_wave_scaling(enemy, _wave)
 
-	# 2) then configure entry from placed position
+	# configure the entry
 	if enemy.has_method("set_entry_target"):
 		enemy.call("set_entry_target", entry_world, arrive_radius)
-
-	# 3) unpause/reset
 	if enemy.has_method("reset_for_spawn"):
 		enemy.call("reset_for_spawn")
 	if enemy.has_method("set_paused"):
@@ -245,112 +367,87 @@ func _spawn_enemy(enemy: CharacterBody3D) -> void:
 	_activate_enemy(enemy)
 	_active.append(enemy)
 
+
+# Wave scaling 
 func _apply_wave_scaling(e: CharacterBody3D, wave: int) -> void:
 	if wave <= 1:
 		return
-	# cache base values once
+
 	if not e.has_meta("base_hp") and e.has_method("get"):
 		var hp_any: Variant = e.get("max_health")
 		if typeof(hp_any) == TYPE_INT:
 			e.set_meta("base_hp", int(hp_any))
+
 	if not e.has_meta("base_speed") and e.has_method("get"):
 		var sp_any: Variant = e.get("speed")
-		if typeof(sp_any) == TYPE_FLOAT:
+		if typeof(sp_any) == TYPE_FLOAT or typeof(sp_any) == TYPE_INT:
 			e.set_meta("base_speed", float(sp_any))
 
-	# apply growth if bases exist
 	if e.has_meta("base_hp"):
 		var base_hp: int = int(e.get_meta("base_hp"))
-		var new_hp: int = int(round(float(base_hp) * pow(hp_growth_per_wave, wave - 1)))
+		var steps: int = wave - 1
+		if steps < 0:
+			steps = 0
+		var new_hp: int = int(round(float(base_hp) * pow(hp_growth_per_wave, steps)))
 		e.set("max_health", new_hp)
-		# if your enemy resets health = max_health inside reset_for_spawn, this will sync automatically
 
 	if e.has_meta("base_speed"):
 		var base_sp: float = float(e.get_meta("base_speed"))
-		var new_sp: float = base_sp * pow(speed_growth_per_wave, wave - 1)
+		var steps2: int = wave - 1
+		if steps2 < 0:
+			steps2 = 0
+		var new_sp: float = base_sp * pow(speed_growth_per_wave, steps2)
 		e.set("speed", new_sp)
 
-# -------------------------------------------------------------------
-# Entry crowd gate
-# -------------------------------------------------------------------
-func _entry_has_room() -> bool:
-	var basis := _portal_spawn_basis()
-	var origin: Vector3  = basis[0]
-	var forward: Vector3 = basis[1]
-
-	var entry_depth: float = clamp(_ts * ENTRY_DEPTH_FACTOR, 0.08, 0.35)
-	var entry_world: Vector3 = origin + forward * entry_depth
-	var entry_cell: Vector2i = _board.world_to_cell(entry_world)
-
-	var in_cell: int = 0
-	for n in get_tree().get_nodes_in_group("enemies"):
-		var en := n as Node3D
-		if en == null:
-			continue
-		if not en.visible:
-			continue
-		if _board.world_to_cell(en.global_position) == entry_cell:
-			in_cell += 1
-			if in_cell >= entry_crowd_limit:
-				return false
-	return true
-
-# -------------------------------------------------------------------
-# Portal basis aligned to spawner rotation; flattened on XZ
-# -------------------------------------------------------------------
+# Basis fallback
 func _portal_spawn_basis() -> Array[Vector3]:
-	var spawner: Node3D = _board.spawner_node
-	var t: Transform3D
-	var spawn_point: Node3D = spawner.get_node_or_null("SpawnPoint") as Node3D
-	if spawn_point != null:
-		t = spawn_point.global_transform
-	else:
-		t = spawner.global_transform
+	var info: Dictionary = _board.get_spawn_gate(3)
+	if info.has("lane_centers") and info.has("forward") and info.has("lateral"):
+		var centers: Array = info["lane_centers"]
+		var mid := int(centers.size() / 2)
+		var origin: Vector3 = _board.get_spawn_position()
+		if not centers.is_empty():
+			origin = centers[mid]
+		var fwd: Vector3 = info["forward"]
+		var lat: Vector3 = info["lateral"]
+		return [origin, fwd, lat]
 
-	var origin: Vector3 = t.origin
+	var spawner: Node3D = _board.spawner_node
+	var t: Transform3D = spawner.global_transform
+	var origin2: Vector3 = t.origin
 	var goal_pos: Vector3 = (_board.get_goal_position() as Vector3)
 
-	# Forward from spawner, flattened
-	var forward: Vector3 = -t.basis.z
-	forward.y = 0.0
-	if forward.length() > 0.0001:
-		forward = forward.normalized()
+	var forward2: Vector3 = -t.basis.z
+	forward2.y = 0.0
+	if forward2.length() > 0.0001:
+		forward2 = forward2.normalized()
 	else:
-		var toward_goal: Vector3 = goal_pos - origin
+		var toward_goal: Vector3 = goal_pos - origin2
 		toward_goal.y = 0.0
 		if toward_goal.length() > 0.0001:
-			forward = toward_goal.normalized()
+			forward2 = toward_goal.normalized()
 		else:
-			forward = Vector3.FORWARD
+			forward2 = Vector3.FORWARD
 
-	# Ensure it points toward goal
-	var goal_dir: Vector3 = goal_pos - origin
+	var goal_dir: Vector3 = goal_pos - origin2
 	goal_dir.y = 0.0
-	if goal_dir.length() > 0.0001:
-		var gnorm: Vector3 = goal_dir.normalized()
-		if forward.dot(gnorm) < 0.0:
-			forward = -forward
+	if goal_dir.length() > 0.0001 and forward2.dot(goal_dir.normalized()) < 0.0:
+		forward2 = -forward2
 
-	# Right-hand basis
-	var right: Vector3 = forward.cross(Vector3.UP)
-	if right.length() > 0.0001:
-		right = right.normalized()
+	var right2: Vector3 = forward2.cross(Vector3.UP)
+	if right2.length() > 0.0001:
+		right2 = right2.normalized()
 	else:
-		right = Vector3.RIGHT
+		right2 = Vector3.RIGHT
+	return [origin2, forward2, right2]
 
-	return [origin, forward, right]
-
-# -------------------------------------------------------------------
 # Signals from enemies
-# -------------------------------------------------------------------
 func _on_enemy_released(e: CharacterBody3D) -> void:
 	_release_enemy(e)
 
 func _on_enemy_tree_exited(e: CharacterBody3D) -> void:
 	_active.erase(e)
+	_pool.erase(e)
 
-# -------------------------------------------------------------------
-# Optional pause
-# -------------------------------------------------------------------
 func pause_spawning(p: bool) -> void:
 	_paused = p

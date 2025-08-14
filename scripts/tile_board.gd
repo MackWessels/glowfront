@@ -191,6 +191,14 @@ func _on_place_selected(action: String) -> void:
 	var pos: Vector2i = active_tile.grid_position
 	var blocks := (action == "turret" or action == "wall")
 
+	if blocks:
+		var gate_cells: Array[Vector2i] = spawn_lane_cells(3)
+		if gate_cells.has(pos):
+			# Break via the same sequence you use for path blocks.
+			await _soft_block_sequence(active_tile, action, false)
+			active_tile = null
+			return
+
 	# Non-blocking actions
 	if not blocks:
 		if closing.has(pos): closing.erase(pos)
@@ -280,13 +288,21 @@ func _pause_enemies_subset(reach: Dictionary, pause: bool) -> Array[Node]:
 			affected.append(e)
 	return affected
 
+func _pause_enemies_outside(reach: Dictionary, pause: bool) -> Array[Node]:
+	var affected: Array[Node] = []
+	for e: Node3D in get_tree().get_nodes_in_group("enemy"):
+		var cell: Vector2i = world_to_cell(e.global_position)
+		if not reach.has(cell):
+			e.set_paused(pause)
+			e.set_physics_process(not pause)
+			affected.append(e)
+	return affected
 
 func _wait_enemy_clear_then_break(pos: Vector2i) -> void:
-	# Pause upstream enemies + spawner with the BLUE (blocked) cell in place
-	var spawn_cell: Vector2i = world_to_cell(spawner_node.global_position)
-	var reach := _cells_reachable_from(spawn_cell)
+	# Pause spawns + only enemies that cannot reach the goal right now
 	enemy_spawner.pause_spawning(true)
-	var paused: Array = _pause_enemies_subset(reach, true)
+	var goal_reach: Dictionary = _cells_reachable_from(_goal_cell())
+	var paused: Array = _pause_enemies_outside(goal_reach, true)
 
 	# Let the enemy currently on the tile pass
 	while _any_enemy_on(pos):
@@ -317,12 +333,10 @@ func _soft_block_sequence(tile: Node, action: String, already_placed: bool) -> v
 		tile.apply_placement(action)
 		_recompute_flow()
 
-	# Pause spawns + only the upstream enemies
+	# Pause spawns + only enemies that cannot reach the goal
 	enemy_spawner.pause_spawning(true)
-
-	var spawn_cell: Vector2i = world_to_cell(spawner_node.global_position)
-	var reach: Dictionary = _cells_reachable_from(spawn_cell)
-	var paused: Array = _pause_enemies_subset(reach, true)
+	var goal_reach: Dictionary = _cells_reachable_from(_goal_cell())
+	var paused: Array = _pause_enemies_outside(goal_reach, true)
 
 	# Fire the breaker shot and wait for its flight time
 	var wait_t: float = 1.0
@@ -349,3 +363,103 @@ func _soft_block_sequence(tile: Node, action: String, already_placed: bool) -> v
 			e.set_physics_process(true)
 
 	enemy_spawner.pause_spawning(false)
+
+
+# Add near your other exports:
+@export var spawner_span: int = 3
+
+
+# Computes grid bounds from your tiles dict so we don't depend on board_size.
+func _grid_bounds() -> Rect2i:
+	var minx := 1_000_000
+	var maxx := -1_000_000
+	var miny := 1_000_000
+	var maxy := -1_000_000
+	for c in tiles.keys():
+		var cc: Vector2i = c
+		if cc.x < minx: minx = cc.x
+		if cc.x > maxx: maxx = cc.x
+		if cc.y < miny: miny = cc.y
+		if cc.y > maxy: maxy = cc.y
+	if maxx < minx or maxy < miny:
+		return Rect2i(Vector2i.ZERO, Vector2i(1, 1))
+	return Rect2i(Vector2i(minx, miny), Vector2i(maxx - minx + 1, maxy - miny + 1))
+
+# Provide multi-lane spawn geometry to the spawner.
+func get_spawn_gate(span: int = -1) -> Dictionary:
+	if span <= 0:
+		span = spawner_span
+
+	var sp_world := spawner_node.global_transform.origin
+	var sp_cell: Vector2i = world_to_cell(sp_world)
+
+	var bounds := _grid_bounds()
+	var left := bounds.position.x
+	var top := bounds.position.y
+	var right := bounds.position.x + bounds.size.x - 1
+	var bottom := bounds.position.y + bounds.size.y - 1
+
+	# Which edge are we on?
+	var normal := Vector2i.ZERO
+	var lateral := Vector2i.ZERO
+	if sp_cell.x <= left:
+		normal = Vector2i(1, 0)  
+		lateral = Vector2i(0, 1) 
+	elif sp_cell.x >= right:
+		normal = Vector2i(-1, 0) 
+		lateral = Vector2i(0, 1)
+	elif sp_cell.y <= top:
+		normal = Vector2i(0, 1) 
+		lateral = Vector2i(1, 0) 
+	else:
+		normal = Vector2i(0, -1)  
+		lateral = Vector2i(1, 0)
+
+	var half_i: int = int(span / 2)
+	var cells: Array[Vector2i] = []
+	for i in range(-half_i, half_i + 1):
+		var c := sp_cell + lateral * i
+		c.x = clampi(c.x, left, right)
+		c.y = clampi(c.y, top, bottom)
+		cells.append(c)
+
+	# Dedupe after clamping
+	var seen := {}
+	var lane_centers: Array[Vector3] = []
+	for c in cells:
+		var key := str(c.x, ",", c.y)
+		if not seen.has(key):
+			seen[key] = true
+			lane_centers.append(cell_to_world(c))
+
+	# Forward/lateral world-space vectors
+	var origin_world := cell_to_world(sp_cell)
+	var fwd3 := (cell_to_world(sp_cell + normal) - origin_world)
+	var lat3 := (cell_to_world(sp_cell + lateral) - origin_world)
+	if fwd3.length() < 0.001: fwd3 = Vector3.FORWARD
+	else: fwd3 = fwd3.normalized()
+	if lat3.length() < 0.001: lat3 = Vector3.RIGHT
+	else: lat3 = lat3.normalized()
+
+	return {
+		"lane_centers": lane_centers,
+		"forward": fwd3,
+		"lateral": lat3,
+		"gate_radius": tile_size * 0.7
+	}
+
+func spawn_lane_cells(span: int = -1) -> Array[Vector2i]:
+	if span <= 0:
+		span = spawner_span
+
+	var info: Dictionary = get_spawn_gate(span)
+
+	var centers: Array = []         
+	if info.has("lane_centers"):
+		centers = info["lane_centers"]
+
+	var cells: Array[Vector2i] = []
+	for p in centers:
+		var pw: Vector3 = p
+		cells.append(world_to_cell(pw))
+	return cells
