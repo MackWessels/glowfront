@@ -1,11 +1,7 @@
-[gd_scene load_steps=6 format=3 uid="uid://bksm503hl2ahi"]
+[gd_scene load_steps=5 format=3 uid="uid://bksm503hl2ahi"]
 
 [ext_resource type="Script" uid="uid://cm3n6i18uv218" path="res://scripts/enemy.gd" id="1_7p1mj"]
 [ext_resource type="PackedScene" uid="uid://dbk0o7kp4ikj3" path="res://models/UFO.glb" id="2_md0e3"]
-
-[sub_resource type="CylinderShape3D" id="CylinderShape3D_md0e3"]
-height = 0.237122
-radius = 1.01123
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_4ra3w"]
 
@@ -17,10 +13,6 @@ transform = Transform3D(0.35, 0, 0, 0, 0.35, 0, 0, 0, 0.35, 0, 0, 0)
 collision_layer = 4
 collision_mask = 38
 script = ExtResource("1_7p1mj")
-
-[node name="BaseCollider" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.00418091, 0)
-shape = SubResource("CylinderShape3D_md0e3")
 
 [node name="DomeCollider" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.168067, 0)

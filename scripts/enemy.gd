@@ -8,6 +8,10 @@ extends CharacterBody3D
 @export var tile_board_path: NodePath
 @export var knockback_decay: float = 6.0
 @export var knockback_max: float = 8.0
+@export var turn_speed_deg: float = 540.0        # NEW: yaw turn rate
+
+# identity
+@export var is_elite: bool = false               # NEW: elite tag
 
 # health 
 @export var max_health: int = 3
@@ -76,6 +80,8 @@ func _ready() -> void:
 		_y_plane_set = true
 
 	add_to_group("enemies", true)
+	if is_elite:
+		add_to_group("elite_enemies", true)   # NEW
 	_build_healthbar()
 
 func set_paused(p: bool) -> void:
@@ -277,6 +283,7 @@ func _move_horizontal_toward(target_vel: Vector3, delta: float) -> void:
 
 	_apply_y_lock()
 	move_and_slide()
+	_update_facing_from_velocity(delta)   # NEW: turn to face movement
 
 func _apply_y_lock() -> void:
 	if _y_lock_enabled and _y_plane_set:
@@ -348,6 +355,31 @@ func _get_flow_dir() -> Vector3:
 
 	return Vector3.ZERO
 
+# ---------- NEW: facing control ----------
+func _update_facing_from_velocity(delta: float) -> void:
+	var h := Vector3(velocity.x, 0.0, velocity.z)
+	var L2 := h.length_squared()
+	if L2 <= EPS * EPS:
+		return
+
+	var desired_fwd := h / sqrt(L2)                 # where we’re moving
+	var current_fwd := -global_transform.basis.z    # Godot forward is -Z
+	current_fwd.y = 0.0
+	var cf2 := current_fwd.length_squared()
+	if cf2 > EPS * EPS:
+		current_fwd /= sqrt(cf2)
+	else:
+		current_fwd = Vector3.FORWARD
+
+	var angle := current_fwd.signed_angle_to(desired_fwd, Vector3.UP)
+	var max_step := deg_to_rad(turn_speed_deg) * delta
+	if angle > max_step:
+		angle = max_step
+	elif angle < -max_step:
+		angle = -max_step
+
+	rotate_y(angle)
+# ----------------------------------------
 
 func _build_healthbar() -> void:
 	_hb_root = Node3D.new()

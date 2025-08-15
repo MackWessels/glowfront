@@ -1,7 +1,8 @@
-[gd_scene load_steps=4 format=3 uid="uid://4r5ok51tc656"]
+[gd_scene load_steps=5 format=3 uid="uid://4r5ok51tc656"]
 
 [ext_resource type="Script" uid="uid://duu1x8tbofnps" path="res://scripts/enemy_spawner.gd" id="1_ks1gq"]
 [ext_resource type="PackedScene" uid="uid://bksm503hl2ahi" path="res://scenes/enemy.tscn" id="2_devoi"]
+[ext_resource type="PackedScene" uid="uid://f0dcxgidw8uu" path="res://scenes/elite_enemy.tscn" id="3_xl0gr"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_devoi"]
 size = Vector3(6, 1, 1)
@@ -9,6 +10,7 @@ size = Vector3(6, 1, 1)
 [node name="EnemySpawner" type="Node3D"]
 script = ExtResource("1_ks1gq")
 enemy_scene = ExtResource("2_devoi")
+elite_enemy_scene = ExtResource("3_xl0gr")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, -1.5)
