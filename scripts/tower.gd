@@ -7,10 +7,17 @@ extends Node3D
 @export var tracer_speed: float = 120.0
 @export var ray_mask: int = -1
 
+# ---- Minerals integration ----
+@export var build_cost: int = 10
+@export var minerals_path: NodePath    # optional; you can leave blank
+
+var _minerals: Node = null
+signal build_paid(cost: int)
+signal build_denied(cost: int)
+
 @onready var DetectionArea: Area3D   = $DetectionArea
 @onready var Turret: Node3D          = $tower_model/Turret
 @onready var MuzzlePoint: Node3D     = $tower_model/Turret/Barrel/MuzzlePoint
-
 
 var _anim: AnimationPlayer = null
 var _muzzle_particles: Node = null   
@@ -19,7 +26,49 @@ var can_fire: bool = true
 var target: Node3D = null
 var targets_in_range: Array[Node3D] = []
 
+# ----- public injection (if you spawn towers via script) -----
+func set_minerals_ref(n: Node) -> void:
+	_minerals = n
+
 func _ready() -> void:
+	# Resolve minerals (in case it wasn't injected)
+	if _minerals == null:
+		_resolve_minerals()
+	if _minerals == null:
+		# Try next frame in case scene order loads later
+		await get_tree().process_frame
+		_resolve_minerals()
+
+	# Attempt to pay build cost
+	if build_cost > 0 and _minerals != null:
+		var bal := _safe_get_balance()
+		print("[Tower] Spawned. Build cost=", build_cost, " | Balance(before)=", bal)
+
+		var ok := true
+		if _minerals.has_method("spend"):
+			ok = bool(_minerals.call("spend", build_cost))
+		else:
+			# fallback if your manager lacks spend()
+			ok = _minerals.has_method("can_afford") and bool(_minerals.call("can_afford", build_cost))
+			if ok:
+				var cur := _safe_get_balance()
+				if _minerals.has_method("set_amount"):
+					_minerals.call("set_amount", max(0, cur - build_cost))
+				else:
+					print("[Tower] WARN: Minerals has no spend/set_amount; cannot deduct.")
+		if not ok:
+			print("[Tower] Build DENIED. Not enough minerals.")
+			emit_signal("build_denied", build_cost)
+			queue_free()
+			return
+		else:
+			var after := _safe_get_balance()
+			print("[Tower] Build PAID. Balance(after)=", after)
+			emit_signal("build_paid", build_cost)
+	else:
+		if build_cost > 0:
+			print("[Tower] Build cost required, but Minerals not found. Tower is FREE this time.")
+
 	DetectionArea.body_entered.connect(_on_body_entered)
 	DetectionArea.body_exited.connect(_on_body_exited)
 
@@ -32,6 +81,36 @@ func _ready() -> void:
 		_muzzle_particles = MuzzlePoint.get_node_or_null("GPUParticles3D")
 	if _muzzle_particles == null:
 		_muzzle_particles = MuzzlePoint.get_node_or_null("CPUParticles3D")
+
+func _resolve_minerals() -> void:
+	# 1) explicit path
+	if minerals_path != NodePath(""):
+		_minerals = get_node_or_null(minerals_path)
+		if _minerals != null:
+			print("[Tower] Minerals resolved via path: ", _minerals)
+			return
+	# 2) autoload named "Minerals"
+	var auto := get_node_or_null("/root/Minerals")
+	if auto != null:
+		_minerals = auto
+		print("[Tower] Minerals resolved via autoload.")
+		return
+	# 3) search anywhere under root for node named "Minerals" (attached to Main)
+	var root := get_tree().root
+	if root != null:
+		var found := root.find_child("Minerals", true, false)
+		if found != null:
+			_minerals = found
+			print("[Tower] Minerals resolved via search: ", _minerals)
+
+func _safe_get_balance() -> int:
+	if _minerals == null:
+		return 0
+	if _minerals.has_method("get"):
+		var v = _minerals.get("minerals")
+		if typeof(v) == TYPE_INT:
+			return int(v)
+	return 0
 
 func _on_body_entered(body: Node) -> void:
 	if body.is_in_group("enemies"):
@@ -119,10 +198,7 @@ func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
 	if tracer == null:
 		return
 
-	# Add to scene first so transforms are stable
 	get_tree().current_scene.add_child(tracer)
-
-	# Position at muzzle
 	tracer.global_position = start_pos
 
 	if tracer.has_method("setup"):
@@ -140,7 +216,6 @@ func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
 		var tw := get_tree().create_tween()
 		tw.tween_property(tracer, "global_position", end_pos, dur)
 		tw.tween_callback(tracer.queue_free)
-
 
 func _play_shoot_fx() -> void:
 	if _muzzle_particles != null:

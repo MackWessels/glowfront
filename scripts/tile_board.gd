@@ -10,6 +10,12 @@ extends Node3D
 @export var placement_menu: PopupMenu
 @export var enemy_spawner: Node3D
 
+# --- Minerals / economy ---
+@export var minerals_node_path: NodePath        # optional; leave empty if using /root/Minerals or a node named "Minerals"
+@export var turret_cost: int = 10               # cost for placing a turret
+@export var econ_debug: bool = true             # print to console
+var _minerals: Node = null
+
 signal global_path_changed
 
 var tiles: Dictionary = {}
@@ -44,18 +50,47 @@ func _ready() -> void:
 	_recompute_flow()
 	placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
 
+	_econ_resolve()
+
 # blue/pending build state
 func _physics_process(_delta: float) -> void:
 	if closing.is_empty():
 		return
 
 	var changed := false
+	# finalize any blue tiles whose cell is now free of enemies
 	for pos: Vector2i in closing.keys():
 		if _any_enemy_on(pos):
 			continue
 		if pending_action.has(pos) and tiles.has(pos):
+			var act: String = pending_action[pos]
+			var cost_now := _cost_for_action(act)
+
+			# re-check funds at finalization time
+			if cost_now > 0 and not _econ_can_afford(cost_now):
+				if econ_debug:
+					print("[TileBoard] Finalize CANCEL: not enough minerals for ", act, " at ", pos, ". Need=", cost_now, " Bal=", _econ_balance())
+				tiles[pos].set_pending_blue(false)
+				pending_action.erase(pos)
+				closing.erase(pos)
+				changed = true
+				continue
+
 			tiles[pos].set_pending_blue(false)
-			tiles[pos].apply_placement(pending_action[pos])
+			tiles[pos].apply_placement(act)
+
+			var placed_ok := _placement_succeeded(tiles[pos], act)
+			if placed_ok and cost_now > 0:
+				var paid := _econ_spend(cost_now)
+				if not paid:
+					if econ_debug:
+						print("[TileBoard] Payment FAILED on finalize; reverting build at ", pos)
+					if tiles[pos].has_method("break_tile"):
+						tiles[pos].break_tile()
+				else:
+					if econ_debug:
+						print("[TileBoard] Finalize OK: spent ", cost_now, " -> bal=", _econ_balance())
+
 			pending_action.erase(pos)
 			closing.erase(pos)
 			changed = true
@@ -63,6 +98,96 @@ func _physics_process(_delta: float) -> void:
 	if changed:
 		_recompute_flow()
 		emit_signal("global_path_changed")
+
+# ---------- ECON helpers ----------
+func _econ_resolve() -> void:
+	# 1) explicit path
+	if minerals_node_path != NodePath(""):
+		_minerals = get_node_or_null(minerals_node_path)
+	# 2) autoload /root/Minerals
+	if _minerals == null:
+		_minerals = get_node_or_null("/root/Minerals")
+	# 3) search anywhere for a node named "Minerals"
+	if _minerals == null:
+		var root := get_tree().root
+		if root:
+			_minerals = root.find_child("Minerals", true, false)
+
+	if econ_debug:
+		if _minerals:
+			print("[TileBoard] Minerals resolved. Balance=", _econ_balance())
+		else:
+			print("[TileBoard] Minerals NOT found; turret placement is FREE.")
+
+func _econ_balance() -> int:
+	if _minerals == null:
+		return 0
+
+	var v: Variant = null
+	if _minerals.has_method("get"):
+		v = _minerals.get("minerals")
+
+	if typeof(v) == TYPE_INT:
+		return int(v)
+	return 0
+
+
+func _econ_can_afford(cost_val: int) -> bool:
+	if cost_val <= 0 or _minerals == null:
+		return true
+	if _minerals.has_method("can_afford"):
+		var ok := bool(_minerals.call("can_afford", cost_val))
+		if econ_debug:
+			print("[TileBoard] can_afford? cost=", cost_val, " -> ", ok, " (bal=", _econ_balance(), ")")
+		return ok
+	var ok2 := cost_val <= _econ_balance()
+	if econ_debug:
+		print("[TileBoard] can_afford? (fallback) cost=", cost_val, " -> ", ok2, " (bal=", _econ_balance(), ")")
+	return ok2
+
+func _econ_spend(cost_val: int) -> bool:
+	if cost_val <= 0 or _minerals == null:
+		return true
+	var ok := true
+	if _minerals.has_method("spend"):
+		ok = bool(_minerals.call("spend", cost_val))
+	elif _minerals.has_method("set_amount"):
+		var bal := _econ_balance()
+		if bal < cost_val:
+			ok = false
+		else:
+			_minerals.call("set_amount", bal - cost_val)
+	else:
+		# No spend API; do not silently charge.
+		ok = _econ_balance() >= cost_val
+		if ok and econ_debug:
+			print("[TileBoard] WARN: Minerals has no spend/set_amount; NOT deducting.")
+	if econ_debug:
+		print("[TileBoard] spend cost=", cost_val, " -> ", ok, " (bal=", _econ_balance(), ")")
+	return ok
+
+func _cost_for_action(action: String) -> int:
+	match action:
+		"turret":
+			return turret_cost
+		_:
+			return 0
+
+func _placement_succeeded(tile: Node, action: String) -> bool:
+	match action:
+		"turret":
+			if tile.has_method("has_turret"):
+				return bool(tile.call("has_turret"))
+			if tile.has_method("get"):
+				var v = tile.get("has_turret")
+				if typeof(v) == TYPE_BOOL:
+					return bool(v)
+			# fallback heuristic
+			var tower := tile.find_child("Tower", true, false)
+			return tower != null
+		_:
+			return true
+# -----------------------------------
 
 # Board generation
 func generate_board() -> void:
@@ -191,6 +316,13 @@ func _on_place_selected(action: String) -> void:
 	var pos: Vector2i = active_tile.grid_position
 	var blocks := (action == "turret" or action == "wall")
 
+	# ECON pre-check (only turrets for now)
+	var action_cost := _cost_for_action(action)
+	if action_cost > 0 and not _econ_can_afford(action_cost):
+		if econ_debug:
+			print("[TileBoard] DENIED: Not enough minerals for ", action, ". Need=", action_cost, " Bal=", _econ_balance())
+		return
+
 	if blocks:
 		var gate_cells: Array[Vector2i] = spawn_lane_cells(3)
 		if gate_cells.has(pos):
@@ -216,6 +348,8 @@ func _on_place_selected(action: String) -> void:
 		closing[pos] = true
 		pending_action[pos] = action
 		tiles[pos].set_pending_blue(true)
+		if econ_debug and action_cost > 0:
+			print("[TileBoard] Deferred build queued @", pos, " cost=", action_cost, " (bal=", _econ_balance(), ")")
 
 		var path_ok := _recompute_flow()
 		emit_signal("global_path_changed")
@@ -226,7 +360,7 @@ func _on_place_selected(action: String) -> void:
 		active_tile = null
 		return
 
-	# No enemy on the tile: place immediately
+	# No enemy on the tile: place immediately, but charge only if final OK
 	closing[pos] = true
 	pending_action[pos] = action
 	tiles[pos].set_pending_blue(true)
@@ -236,6 +370,19 @@ func _on_place_selected(action: String) -> void:
 	if not ok:
 		await _soft_block_sequence(active_tile, action, true)
 	else:
+		# Only pay if it actually placed
+		var placed_ok := _placement_succeeded(active_tile, action)
+		if placed_ok and action_cost > 0:
+			var paid := _econ_spend(action_cost)
+			if not paid:
+				if econ_debug:
+					print("[TileBoard] Payment FAILED; reverting immediate build at ", pos)
+				if active_tile.has_method("break_tile"):
+					active_tile.break_tile()
+			else:
+				if econ_debug:
+					print("[TileBoard] Build OK @", pos, " spent=", action_cost, " -> bal=", _econ_balance())
+
 		tiles[pos].set_pending_blue(false)
 		closing.erase(pos)
 		pending_action.erase(pos)
@@ -326,7 +473,6 @@ func _wait_enemy_clear_then_break(pos: Vector2i) -> void:
 
 	enemy_spawner.pause_spawning(false)
 
-
 func _soft_block_sequence(tile: Node, action: String, already_placed: bool) -> void:
 	# If not placed yet, place so routing reflects the block.
 	if not already_placed:
@@ -364,10 +510,8 @@ func _soft_block_sequence(tile: Node, action: String, already_placed: bool) -> v
 
 	enemy_spawner.pause_spawning(false)
 
-
 # Add near your other exports:
 @export var spawner_span: int = 3
-
 
 # Computes grid bounds from your tiles dict so we don't depend on board_size.
 func _grid_bounds() -> Rect2i:
