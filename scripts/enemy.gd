@@ -13,10 +13,12 @@ extends CharacterBody3D
 # ---------------- identity ----------------
 @export var is_elite: bool = false
 
-# ---------------- health ----------------
-@export var max_health: int = 3
+# ---------------- health / combat ----------------
+@export var max_health: int = 2           # lowered default so enemies feel less tanky
+@export var armor_pct: float = 0.0        # 0.0–0.95 percent-based reduction
 var health: int = 1
 signal died
+signal health_changed(current: int, maxv: int)
 
 # ---------------- economy ----------------
 @export var bounty: int = 5                        # minerals awarded on kill
@@ -71,7 +73,6 @@ func _ready() -> void:
 	motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
 	floor_snap_length = 0.0
 
-	# init health
 	health = max_health
 
 	if tile_board_path != NodePath(""):
@@ -85,8 +86,8 @@ func _ready() -> void:
 		_y_plane = global_position.y
 		_y_plane_set = true
 
-	add_to_group("enemy", true)       # TileBoard expects "enemy"
-	add_to_group("enemies", true)     # keep original too
+	add_to_group("enemy", true)       # keep both for compatibility
+	add_to_group("enemies", true)
 	if is_elite:
 		add_to_group("elite_enemies", true)
 
@@ -97,14 +98,47 @@ func set_paused(p: bool) -> void:
 	_paused = p
 
 # ---------------- damage / death ----------------
-func take_damage(amount: int) -> void:
+# Accepts either an int or a Dictionary context:
+# { base:int, flat_bonus:int, mult:float, crit_chance:float, crit_mult:float, tags:Array[String] }
+func take_damage(d) -> void:
 	if _dead:
 		return
-	health -= amount
+
+	var dmg: int = 0
+	if typeof(d) == TYPE_DICTIONARY:
+		dmg = _compute_damage_from_ctx(d)
+	else:
+		dmg = int(d)
+
+	if dmg <= 0:
+		return
+
+	health = max(health - dmg, 0)
+	emit_signal("health_changed", health, max_health)
+	_update_healthbar()
+
 	if health <= 0:
 		_die_with_reward(true)  # killed by damage -> award bounty
-	else:
-		_update_healthbar()
+
+func _compute_damage_from_ctx(ctx: Dictionary) -> int:
+	var base: int = int(ctx.get("base", 0))
+	var flat_bonus: int = int(ctx.get("flat_bonus", 0))
+	var mult: float = float(ctx.get("mult", 1.0))
+
+	# Optional crit
+	var p: float = clampf(float(ctx.get("crit_chance", 0.0)), 0.0, 1.0)
+	var do_crit: bool = (p > 0.0 and randf() < p)
+	var crit_mult: float = float(ctx.get("crit_mult", 2.0))
+
+	var raw: float = float(base + flat_bonus) * mult
+	if do_crit:
+		raw *= crit_mult
+
+	# Armor as percent reduction
+	var reduced: float = raw * (1.0 - clampf(armor_pct, 0.0, 0.95))
+	var final_amount: int = int(floor(maxf(1.0, reduced)))
+	return final_amount
+
 
 func _die_with_reward(award: bool) -> void:
 	if _dead:
@@ -112,11 +146,18 @@ func _die_with_reward(award: bool) -> void:
 	_dead = true
 
 	if award and bounty > 0:
-		var src := "elite_kill" if is_elite else "kill"
+		var src := "elite_kill"
+		if not is_elite:
+			src = "kill"
 		_econ_add(bounty, src)
 
 	emit_signal("died")
 	queue_free()
+
+# Public helper if something external despawns the enemy at the goal.
+# Reaching the goal gives NO bounty.
+func on_reach_goal() -> void:
+	_die_with_reward(false)
 
 # ---------------- helpers ----------------
 func lock_y_to(y: float) -> void:
@@ -136,18 +177,15 @@ func set_entry_point(p: Vector3) -> void:
 	set_entry_target(p, ENTRY_RADIUS_DEFAULT)
 
 func set_entry_target(p: Vector3, radius: float) -> void:
-	# snap target to our y-plane if locked
 	if _y_lock_enabled and _y_plane_set:
 		p.y = _y_plane
 
-	# clamp radius
 	if radius < ENTRY_RADIUS_MIN:
 		radius = ENTRY_RADIUS_MIN
 
 	_entry_point = p
 	_entry_radius = radius
 
-	# decide if we need an entry step
 	if not is_inside_tree():
 		_entry_active = true
 	else:
@@ -156,12 +194,10 @@ func set_entry_target(p: Vector3, radius: float) -> void:
 		var r: float = _entry_radius + EPS
 		_entry_active = to_entry.length_squared() > r * r
 
-	# reset entry trackers
 	_entry_elapsed = 0.0
 	_entry_stuck_t = 0.0
 	_entry_prev_dist = 1e9
 
-# called by spawner right after set_entry_target
 func ghost_until_entry() -> void:
 	_ghost_until_entry = true
 	_saved_layer = collision_layer
@@ -175,24 +211,21 @@ func _restore_collision_if_ghosting() -> void:
 		collision_layer = _saved_layer
 		collision_mask  = _saved_mask
 
-# optional: used by spawner between spawns
 func reset_for_spawn() -> void:
 	_paused = false
 	_dead = false
 	velocity = Vector3.ZERO
 	_knockback = Vector3.ZERO
 
-	# restore HP to new max
 	health = max_health
+	emit_signal("health_changed", health, max_health)
 	_update_healthbar()
 
-	# do not change ghost flags here, spawner may set them right after
-
+# ---------------- physics ----------------
 func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
-	# paused or no board
 	if _paused or _board == null:
 		velocity.x = 0.0
 		velocity.z = 0.0
@@ -203,12 +236,11 @@ func _physics_process(delta: float) -> void:
 		_update_hb_height()
 		return
 
-	# first frame only Y lock
 	if _y_lock_enabled and not _y_plane_set:
 		_y_plane = global_position.y
 		_y_plane_set = true
 
-	# take a short step into the lane, then switch off (with fail-safes)
+	# Entry step
 	if _entry_active:
 		_entry_elapsed += delta
 
@@ -216,19 +248,16 @@ func _physics_process(delta: float) -> void:
 		to_entry.y = 0.0
 		var r := _entry_radius + EPS
 
-		# finished entry?
 		if to_entry.length_squared() <= r * r:
 			_entry_active = false
 			_restore_collision_if_ghosting()
 		else:
-			# desired step straight toward the entry point
 			var target_vel := Vector3.ZERO
 			if to_entry.length_squared() > EPS * EPS:
 				target_vel = to_entry.normalized() * speed
 
 			_move_horizontal_toward(target_vel, delta)
 
-			# STUCK / COLLISION DETECTION
 			var dist_now := to_entry.length()
 			if dist_now > _entry_prev_dist - 0.02:
 				_entry_stuck_t += delta
@@ -250,20 +279,18 @@ func _physics_process(delta: float) -> void:
 				_restore_collision_if_ghosting()
 
 			_update_hb_height()
-
-			# While still doing the entry step, skip normal flow logic
 			if _entry_active:
 				return
 
-	# goal check — reaching the goal gives NO reward
+	# Goal check — NO reward if reached
 	var goal_pos: Vector3 = _board.get_goal_position()
 	var to_goal: Vector3 = goal_pos - global_position
 	to_goal.y = 0.0
 	if to_goal.length_squared() <= goal_radius * goal_radius:
-		_die_with_reward(false)
+		on_reach_goal()
 		return
 
-	# flow-field steering
+	# Flow-field steering
 	var dir := _get_flow_dir()
 	var target_vel := Vector3.ZERO
 	if dir != Vector3.ZERO:
@@ -273,20 +300,15 @@ func _physics_process(delta: float) -> void:
 	_update_hb_height()
 
 func _move_horizontal_toward(target_vel: Vector3, delta: float) -> void:
-	# horizontal = steering + knockback
 	var desired := Vector3(
 		target_vel.x + _knockback.x,
 		0.0,
 		target_vel.z + _knockback.z
 	)
 
-	# Current horizontal
 	var cur_h := Vector3(velocity.x, 0.0, velocity.z)
-
-	# Accelerate toward target
 	cur_h = cur_h.move_toward(desired, acceleration * delta)
 
-	# Clamp to max speed
 	var max_sq := max_speed * max_speed
 	var cur_sq := cur_h.length_squared()
 	if cur_sq > max_sq and cur_sq > EPS * EPS:
@@ -314,7 +336,6 @@ func _get_flow_dir() -> Vector3:
 	var goal_pos: Vector3 = _board.get_goal_position()
 	var goal_cell: Vector2i = _board.world_to_cell(goal_pos)
 
-	# Outside known tiles: steer gently toward goal
 	if not _board.tiles.has(pos):
 		var v_out: Vector3 = goal_pos - global_position
 		v_out.y = 0.0
@@ -323,7 +344,6 @@ func _get_flow_dir() -> Vector3:
 			return v_out / sqrt(L2)
 		return Vector3.ZERO
 
-	# On goal cell: steer directly to goal point
 	if pos == goal_cell:
 		var v_goal: Vector3 = goal_pos - global_position
 		v_goal.y = 0.0
@@ -332,7 +352,6 @@ func _get_flow_dir() -> Vector3:
 			return v_goal / sqrt(Lg2)
 		return Vector3.ZERO
 
-	# If current cell is temporarily blue or not walkable, escape to best neighbor
 	var standing_blocked: bool = false
 	if bool(_board.closing.get(pos, false)):
 		standing_blocked = true
@@ -360,7 +379,6 @@ func _get_flow_dir() -> Vector3:
 				return v2 / sqrt(L2b)
 		return Vector3.ZERO
 
-	# Use precomputed flow-field direction
 	var dir: Vector3 = _board.dir_field.get(pos, Vector3.ZERO)
 	dir.y = 0.0
 	var d2: float = dir.length_squared()
@@ -371,13 +389,13 @@ func _get_flow_dir() -> Vector3:
 
 # ---------- facing control ----------
 func _update_facing_from_velocity(delta: float) -> void:
-	var h := Vector3(velocity.x, 0.0, 0.0 + velocity.z)
+	var h := Vector3(velocity.x, 0.0, velocity.z)
 	var L2 := h.length_squared()
 	if L2 <= EPS * EPS:
 		return
 
-	var desired_fwd := h / sqrt(L2)                 # where we’re moving
-	var current_fwd := -global_transform.basis.z    # Godot forward is -Z
+	var desired_fwd := h / sqrt(L2)
+	var current_fwd := -global_transform.basis.z
 	current_fwd.y = 0.0
 	var cf2 := current_fwd.length_squared()
 	if cf2 > EPS * EPS:
@@ -393,7 +411,6 @@ func _update_facing_from_velocity(delta: float) -> void:
 		angle = -max_step
 
 	rotate_y(angle)
-# ------------------------------------
 
 # ---------------- healthbar ----------------
 func _build_healthbar() -> void:
@@ -435,13 +452,10 @@ func _update_healthbar() -> void:
 
 # ---------------- economy helpers ----------------
 func _econ_resolve() -> void:
-	# 1) explicit path
 	if minerals_node_path != NodePath(""):
 		_minerals = get_node_or_null(minerals_node_path)
-	# 2) Economy autoload (preferred)
 	if _minerals == null:
 		_minerals = get_node_or_null("/root/Economy")
-	# 3) Minerals autoload or scene node named "Minerals"
 	if _minerals == null:
 		_minerals = get_node_or_null("/root/Minerals")
 	if _minerals == null:
@@ -462,14 +476,12 @@ func _econ_add(amount: int, source: String) -> void:
 	elif _minerals.has_method("deposit"):
 		_minerals.call("deposit", amount)
 	elif _minerals.has_method("set_amount"):
-		# fallback property logic
 		var v: Variant = _minerals.get("minerals")
 		var cur: int = 0
 		if typeof(v) == TYPE_INT:
 			cur = int(v)
 		_minerals.call("set_amount", cur + amount)
 	else:
-		# last resort: direct property write if present
 		var v2: Variant = _minerals.get("minerals")
 		if typeof(v2) == TYPE_INT:
 			_minerals.set("minerals", int(v2) + amount)

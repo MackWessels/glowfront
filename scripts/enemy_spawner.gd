@@ -231,9 +231,22 @@ func _start_next_wave() -> void:
 	_wave += 1
 	_plan = _build_wave_plan(_wave)
 	_to_spawn = _plan.size()
+
+	# --- NEW: log projected HP for this wave ---
+	var base_basic := _peek_base_hp(false)
+	var base_elite := _peek_base_hp(true)
+	var hp_basic := _predict_hp_for_wave(base_basic, _wave)
+	if elite_enemy_scene != null:
+		var hp_elite := _predict_hp_for_wave(base_elite, _wave)
+		print("[Wave ", _wave, "] enemy HP=", hp_basic, " | elite HP=", hp_elite)
+	else:
+		print("[Wave ", _wave, "] enemy HP=", hp_basic, " | elite HP=N/A")
+	# ------------------------------------------
+
 	emit_signal("wave_started", _wave, _to_spawn)
 	_state = SPAWNING
 	_spawn_cooldown = float(max(0.0, wave_first_spawn_delay))
+
 
 func _calc_wave_size(w: int) -> int:
 	var steps: int = w - 1
@@ -536,3 +549,35 @@ func _set_if_has_property(obj: Object, prop: String, value: Variant) -> void:
 		if p.name == prop:
 			obj.set(prop, value)
 			return
+
+func _peek_base_hp(is_elite: bool) -> int:
+	var pool = _pool_elite if is_elite else _pool_basic
+	for e in pool:
+		if is_instance_valid(e):
+			# Prefer captured base HP
+			if e.has_meta("base_hp"):
+				return int(e.get_meta("base_hp"))
+
+			# Explicit Variant type to satisfy the typer
+			var v: Variant = e.get("max_health")
+			if typeof(v) == TYPE_INT:
+				return int(v)
+
+	# Fallback: instantiate once to read export
+	var scene: PackedScene = elite_enemy_scene if is_elite else enemy_scene
+	if scene != null:
+		var tmp := scene.instantiate()
+		if tmp != null:
+			var v2: Variant = tmp.get("max_health")
+			tmp.queue_free()
+			if typeof(v2) == TYPE_INT:
+				return int(v2)
+
+	return 0
+
+
+func _predict_hp_for_wave(base_hp: int, wave: int) -> int:
+	if wave <= 1:
+		return base_hp
+	var steps := wave - 1
+	return int(round(float(base_hp) * pow(hp_growth_per_wave, steps)))

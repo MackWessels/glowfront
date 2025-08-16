@@ -106,6 +106,7 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_dd7d4")
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_2x682"]
+radius = 5.0
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ay4al"]
 size = Vector3(2, 1.739, 2)
@@ -146,7 +147,6 @@ collision_mask = 4
 input_ray_pickable = false
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="DetectionArea"]
-transform = Transform3D(25, 0, 0, 0, 25, 0, 0, 0, 25, 0, 0, 0)
 shape = SubResource("SphereShape3D_2x682")
 
 [node name="StaticBody3D" type="StaticBody3D" parent="."]
