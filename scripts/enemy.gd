@@ -15,11 +15,11 @@ extends CharacterBody3D
 
 # ---------------- health ----------------
 @export var max_health: int = 3
-var health: int = 0
+var health: int = 1
 signal died
 
 # ---------------- economy ----------------
-@export var bounty: int = 1                        # minerals awarded on kill
+@export var bounty: int = 5                        # minerals awarded on kill
 @export var minerals_node_path: NodePath           # optional explicit reference
 @export var econ_debug: bool = true
 var _minerals: Node = null

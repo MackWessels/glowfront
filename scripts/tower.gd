@@ -9,7 +9,7 @@ extends Node3D
 
 # ---- Minerals integration ----
 @export var build_cost: int = 10
-@export var minerals_path: NodePath    # optional; you can leave blank
+@export var minerals_path: NodePath    # optional, can leave blank
 
 var _minerals: Node = null
 signal build_paid(cost: int)
@@ -246,12 +246,19 @@ func _find_enemy_root(obj: Object) -> Node:
 	return null
 
 func _apply_damage(enemy: Node, amount: int) -> void:
+	var final_damage: int = amount
+	var pu := get_node_or_null("/root/PowerUps")
+	if pu and pu.has_method("damage_multiplier"):
+		var m: float = float(pu.call("damage_multiplier", "turret"))
+		final_damage = max(1, int(round(float(amount) * m)))
+
 	if enemy.has_method("take_damage"):
-		enemy.call("take_damage", amount)
+		enemy.call("take_damage", final_damage)
 	elif enemy.has_method("apply_damage"):
-		enemy.call("apply_damage", amount)
+		enemy.call("apply_damage", final_damage)
 	elif enemy.has_method("hit"):
-		enemy.call("hit", amount)
+		enemy.call("hit", final_damage)
+
 
 func _connect_target_signals(t: Node) -> void:
 	if t == null:

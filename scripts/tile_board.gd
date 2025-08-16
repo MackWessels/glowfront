@@ -11,8 +11,8 @@ extends Node3D
 @export var enemy_spawner: Node3D
 
 # --- Minerals / economy ---
-@export var minerals_node_path: NodePath        # optional; leave empty to auto-resolve
-@export var turret_cost: int = 10               # cost for placing a turret
+@export var minerals_node_path: NodePath       
+@export var turret_cost: int = 10             
 @export var econ_debug: bool = true             # print to console
 var _minerals: Node = null                      # can point to Economy autoload or a Minerals node
 
@@ -66,7 +66,8 @@ func _physics_process(_delta: float) -> void:
 			continue
 		if pending_action.has(pos) and tiles.has(pos):
 			var act: String = pending_action[pos]
-			var cost_now := _cost_for_action(act)
+			# Use discounted cost at finalize time
+			var cost_now := _power_cost_for(act)
 
 			# re-check funds at finalization time
 			if cost_now > 0 and not _econ_can_afford(cost_now):
@@ -132,7 +133,7 @@ func _econ_balance() -> int:
 	if _minerals.has_method("balance"):
 		return int(_minerals.call("balance"))
 	# Fallback: property on a Minerals node
-	var v: Variant = _minerals.get("minerals")  # explicit Variant fixes the ':=' inference error
+	var v: Variant = _minerals.get("minerals")
 	if typeof(v) == TYPE_INT:
 		return int(v)
 	return 0
@@ -165,8 +166,10 @@ func _econ_spend(cost_val: int) -> bool:
 	# Next: set_amount(bal - cost)
 	elif _minerals.has_method("set_amount"):
 		var bal := _econ_balance()
-		if bal < cost_val: ok = false
-		else: _minerals.call("set_amount", bal - cost_val)
+		if bal < cost_val:
+			ok = false
+		else:
+			_minerals.call("set_amount", bal - cost_val)
 	else:
 		# No spend API; do not silently charge.
 		ok = _econ_balance() >= cost_val
@@ -326,8 +329,8 @@ func _on_place_selected(action: String) -> void:
 	var pos: Vector2i = active_tile.grid_position
 	var blocks := (action == "turret" or action == "wall")
 
-	# ECON pre-check (only turrets for now)
-	var action_cost := _cost_for_action(action)
+	# ECON pre-check (uses discounted/modified cost)
+	var action_cost := _power_cost_for(action)
 	if action_cost > 0 and not _econ_can_afford(action_cost):
 		if econ_debug:
 			print("[TileBoard] DENIED: Not enough minerals for ", action, ". Need=", action_cost, " Bal=", _econ_balance())
@@ -380,18 +383,20 @@ func _on_place_selected(action: String) -> void:
 	if not ok:
 		await _soft_block_sequence(active_tile, action, true)
 	else:
-		# Only pay if it actually placed
+		# Only pay if it actually placed; re-check discounted cost right now
 		var placed_ok := _placement_succeeded(active_tile, action)
-		if placed_ok and action_cost > 0:
-			var paid := _econ_spend(action_cost)
-			if not paid:
-				if econ_debug:
-					print("[TileBoard] Payment FAILED; reverting immediate build at ", pos)
-				if active_tile.has_method("break_tile"):
-					active_tile.break_tile()
-			else:
-				if econ_debug:
-					print("[TileBoard] Build OK @", pos, " spent=", action_cost, " -> bal=", _econ_balance())
+		if placed_ok:
+			var cost_to_charge := _power_cost_for(action)
+			if cost_to_charge > 0:
+				var paid := _econ_spend(cost_to_charge)
+				if not paid:
+					if econ_debug:
+						print("[TileBoard] Payment FAILED; reverting immediate build at ", pos)
+					if active_tile.has_method("break_tile"):
+						active_tile.break_tile()
+				else:
+					if econ_debug:
+						print("[TileBoard] Build OK @", pos, " spent=", cost_to_charge, " -> bal=", _econ_balance())
 
 		tiles[pos].set_pending_blue(false)
 		closing.erase(pos)
@@ -431,7 +436,7 @@ func _cells_reachable_from(start: Vector2i) -> Dictionary:
 			if not tiles.has(nb): continue       # out of bounds/missing
 			if closing.has(nb): continue         # temporarily blocked (blue)
 			if not tiles[nb].is_walkable(): continue
-			if seen.has(nb): continue           
+			if seen.has(nb): continue
 			seen[nb] = true
 			q.push_back(nb)
 	return seen
@@ -557,16 +562,16 @@ func get_spawn_gate(span: int = -1) -> Dictionary:
 	var normal := Vector2i.ZERO
 	var lateral := Vector2i.ZERO
 	if sp_cell.x <= left:
-		normal = Vector2i(1, 0)  
-		lateral = Vector2i(0, 1) 
+		normal = Vector2i(1, 0)
+		lateral = Vector2i(0, 1)
 	elif sp_cell.x >= right:
-		normal = Vector2i(-1, 0) 
+		normal = Vector2i(-1, 0)
 		lateral = Vector2i(0, 1)
 	elif sp_cell.y <= top:
-		normal = Vector2i(0, 1) 
-		lateral = Vector2i(1, 0) 
+		normal = Vector2i(0, 1)
+		lateral = Vector2i(1, 0)
 	else:
-		normal = Vector2i(0, -1)  
+		normal = Vector2i(0, -1)
 		lateral = Vector2i(1, 0)
 
 	var half_i: int = int(span / 2)
@@ -608,7 +613,7 @@ func spawn_lane_cells(span: int = -1) -> Array[Vector2i]:
 
 	var info: Dictionary = get_spawn_gate(span)
 
-	var centers: Array = []         
+	var centers: Array = []
 	if info.has("lane_centers"):
 		centers = info["lane_centers"]
 
@@ -617,3 +622,11 @@ func spawn_lane_cells(span: int = -1) -> Array[Vector2i]:
 		var pw: Vector3 = p
 		cells.append(world_to_cell(pw))
 	return cells
+
+# ---- PowerUps cost adapter (discounts etc.) ----
+func _power_cost_for(action: String) -> int:
+	var base := _cost_for_action(action)
+	var pu := get_node_or_null("/root/PowerUps")
+	if pu and pu.has_method("modified_cost"):
+		return int(pu.call("modified_cost", action, base))
+	return base

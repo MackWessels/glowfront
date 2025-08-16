@@ -18,3 +18,4 @@ config/icon="res://icon.svg"
 [autoload]
 
 Economy="*res://scripts/economy.gd"
+PowerUps="*res://power_ups.gd"
