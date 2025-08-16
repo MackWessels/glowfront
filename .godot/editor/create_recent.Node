@@ -1,4 +1,7 @@
 Node
+Control
+Label
+CanvasLayer
 CollisionShape3D
 CharacterBody3D
 StaticBody3D
@@ -9,6 +12,3 @@ Path3D
 MeshInstance3D
 Decal
 PopupMenu
-Popup
-Timer
-Camera3D

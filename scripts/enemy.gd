@@ -1,6 +1,6 @@
 extends CharacterBody3D
 
-#  movement 
+# ---------------- movement ----------------
 @export var speed: float = 2.0
 @export var acceleration: float = 15.0
 @export var max_speed: float = 6.0
@@ -8,28 +8,34 @@ extends CharacterBody3D
 @export var tile_board_path: NodePath
 @export var knockback_decay: float = 6.0
 @export var knockback_max: float = 8.0
-@export var turn_speed_deg: float = 540.0        # NEW: yaw turn rate
+@export var turn_speed_deg: float = 540.0
 
-# identity
-@export var is_elite: bool = false               # NEW: elite tag
+# ---------------- identity ----------------
+@export var is_elite: bool = false
 
-# health 
+# ---------------- health ----------------
 @export var max_health: int = 3
 var health: int = 0
 signal died
 
-# entry step targeting 
+# ---------------- economy ----------------
+@export var bounty: int = 1                        # minerals awarded on kill
+@export var minerals_node_path: NodePath           # optional explicit reference
+@export var econ_debug: bool = true
+var _minerals: Node = null
+
+# ---------------- entry step targeting ----------------
 const ENTRY_RADIUS_DEFAULT: float = 0.20
 const ENTRY_RADIUS_MIN: float = 0.01
 const EPS: float = 0.0001
 
-# entry fail-safes 
-@export var entry_abort_timeout: float = 1.00     
-@export var entry_stuck_speed: float = 0.05        
-@export var entry_stuck_duration: float = 0.25   
-@export var entry_abort_on_collision: bool = true  
+# entry fail-safes
+@export var entry_abort_timeout: float = 1.00
+@export var entry_stuck_speed: float = 0.05
+@export var entry_stuck_duration: float = 0.25
+@export var entry_abort_on_collision: bool = true
 
-# state 
+# ---------------- state ----------------
 var _board: Node = null
 var _knockback: Vector3 = Vector3.ZERO
 var _paused: bool = false
@@ -50,12 +56,12 @@ var _entry_elapsed: float = 0.0
 var _entry_stuck_t: float = 0.0
 var _entry_prev_dist: float = 1e9
 
-#  entry ghosting 
+# entry ghosting
 var _ghost_until_entry: bool = false
 var _saved_layer: int = 0
 var _saved_mask: int = 0
 
-# health bar 
+# health bar
 const _HB_SIZE: Vector2   = Vector2(0.6, 0.08)
 const _HB_OFFSET_Y: float = 0.9
 var _hb_root: Node3D = null
@@ -79,32 +85,40 @@ func _ready() -> void:
 		_y_plane = global_position.y
 		_y_plane_set = true
 
-	add_to_group("enemies", true)
+	add_to_group("enemy", true)       # TileBoard expects "enemy"
+	add_to_group("enemies", true)     # keep original too
 	if is_elite:
-		add_to_group("elite_enemies", true)   # NEW
+		add_to_group("elite_enemies", true)
+
+	_econ_resolve()
 	_build_healthbar()
 
 func set_paused(p: bool) -> void:
 	_paused = p
 
-# damage / death 
+# ---------------- damage / death ----------------
 func take_damage(amount: int) -> void:
 	if _dead:
 		return
 	health -= amount
 	if health <= 0:
-		_die()
+		_die_with_reward(true)  # killed by damage -> award bounty
 	else:
 		_update_healthbar()
 
-func _die() -> void:
+func _die_with_reward(award: bool) -> void:
 	if _dead:
 		return
 	_dead = true
+
+	if award and bounty > 0:
+		var src := "elite_kill" if is_elite else "kill"
+		_econ_add(bounty, src)
+
 	emit_signal("died")
 	queue_free()
 
-#  helpers 
+# ---------------- helpers ----------------
 func lock_y_to(y: float) -> void:
 	_y_plane = y
 	_y_plane_set = true
@@ -241,12 +255,12 @@ func _physics_process(delta: float) -> void:
 			if _entry_active:
 				return
 
-	# goal check
+	# goal check — reaching the goal gives NO reward
 	var goal_pos: Vector3 = _board.get_goal_position()
 	var to_goal: Vector3 = goal_pos - global_position
 	to_goal.y = 0.0
 	if to_goal.length_squared() <= goal_radius * goal_radius:
-		_die()
+		_die_with_reward(false)
 		return
 
 	# flow-field steering
@@ -283,7 +297,7 @@ func _move_horizontal_toward(target_vel: Vector3, delta: float) -> void:
 
 	_apply_y_lock()
 	move_and_slide()
-	_update_facing_from_velocity(delta)   # NEW: turn to face movement
+	_update_facing_from_velocity(delta)
 
 func _apply_y_lock() -> void:
 	if _y_lock_enabled and _y_plane_set:
@@ -355,9 +369,9 @@ func _get_flow_dir() -> Vector3:
 
 	return Vector3.ZERO
 
-# ---------- NEW: facing control ----------
+# ---------- facing control ----------
 func _update_facing_from_velocity(delta: float) -> void:
-	var h := Vector3(velocity.x, 0.0, velocity.z)
+	var h := Vector3(velocity.x, 0.0, 0.0 + velocity.z)
 	var L2 := h.length_squared()
 	if L2 <= EPS * EPS:
 		return
@@ -379,14 +393,14 @@ func _update_facing_from_velocity(delta: float) -> void:
 		angle = -max_step
 
 	rotate_y(angle)
-# ----------------------------------------
+# ------------------------------------
 
+# ---------------- healthbar ----------------
 func _build_healthbar() -> void:
 	_hb_root = Node3D.new()
 	add_child(_hb_root)
 	_update_hb_height()
 
-	# red, unshaded, billboard-on-Y
 	var quad := QuadMesh.new()
 	quad.size = _HB_SIZE
 
@@ -405,7 +419,6 @@ func _build_healthbar() -> void:
 	_update_healthbar()
 
 func _update_hb_height() -> void:
-	# keep it floating above the y-locked plane 
 	var base_y := global_position.y
 	if _y_plane_set:
 		base_y = _y_plane
@@ -417,9 +430,48 @@ func _update_healthbar() -> void:
 	var t: float = 0.0
 	if max_health > 0:
 		t = float(health) / float(max_health)
-	if t < 0.0:
-		t = 0.0
-	if t > 1.0:
-		t = 1.0
-	# scale X down to zero 
+	t = clampf(t, 0.0, 1.0)
 	_hb_bar.scale = Vector3(t, 1.0, 1.0)
+
+# ---------------- economy helpers ----------------
+func _econ_resolve() -> void:
+	# 1) explicit path
+	if minerals_node_path != NodePath(""):
+		_minerals = get_node_or_null(minerals_node_path)
+	# 2) Economy autoload (preferred)
+	if _minerals == null:
+		_minerals = get_node_or_null("/root/Economy")
+	# 3) Minerals autoload or scene node named "Minerals"
+	if _minerals == null:
+		_minerals = get_node_or_null("/root/Minerals")
+	if _minerals == null:
+		var root := get_tree().root
+		if root:
+			_minerals = root.find_child("Minerals", true, false)
+	if econ_debug:
+		if _minerals:
+			print("[Enemy] Minerals resolved -> ", _minerals.name)
+		else:
+			print("[Enemy] Minerals NOT found; bounty ignored.")
+
+func _econ_add(amount: int, source: String) -> void:
+	if amount == 0 or _minerals == null:
+		return
+	if _minerals.has_method("add"):
+		_minerals.call("add", amount, source)
+	elif _minerals.has_method("deposit"):
+		_minerals.call("deposit", amount)
+	elif _minerals.has_method("set_amount"):
+		# fallback property logic
+		var v: Variant = _minerals.get("minerals")
+		var cur: int = 0
+		if typeof(v) == TYPE_INT:
+			cur = int(v)
+		_minerals.call("set_amount", cur + amount)
+	else:
+		# last resort: direct property write if present
+		var v2: Variant = _minerals.get("minerals")
+		if typeof(v2) == TYPE_INT:
+			_minerals.set("minerals", int(v2) + amount)
+	if econ_debug:
+		print("[Enemy] bounty +", amount, " (", source, ")")

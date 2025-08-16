@@ -11,10 +11,10 @@ extends Node3D
 @export var enemy_spawner: Node3D
 
 # --- Minerals / economy ---
-@export var minerals_node_path: NodePath        # optional; leave empty if using /root/Minerals or a node named "Minerals"
+@export var minerals_node_path: NodePath        # optional; leave empty to auto-resolve
 @export var turret_cost: int = 10               # cost for placing a turret
 @export var econ_debug: bool = true             # print to console
-var _minerals: Node = null
+var _minerals: Node = null                      # can point to Economy autoload or a Minerals node
 
 signal global_path_changed
 
@@ -48,7 +48,9 @@ func _ready() -> void:
 	position_portal(goal_node, "right")
 	position_portal(spawner_node, "left")
 	_recompute_flow()
-	placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
+
+	if placement_menu and not placement_menu.is_connected("place_selected", Callable(self, "_on_place_selected")):
+		placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
 
 	_econ_resolve()
 
@@ -104,10 +106,14 @@ func _econ_resolve() -> void:
 	# 1) explicit path
 	if minerals_node_path != NodePath(""):
 		_minerals = get_node_or_null(minerals_node_path)
-	# 2) autoload /root/Minerals
+
+	# 2) Economy autoload (recommended)
+	if _minerals == null:
+		_minerals = get_node_or_null("/root/Economy")
+
+	# 3) Minerals autoload or scene node called "Minerals"
 	if _minerals == null:
 		_minerals = get_node_or_null("/root/Minerals")
-	# 3) search anywhere for a node named "Minerals"
 	if _minerals == null:
 		var root := get_tree().root
 		if root:
@@ -115,31 +121,32 @@ func _econ_resolve() -> void:
 
 	if econ_debug:
 		if _minerals:
-			print("[TileBoard] Minerals resolved. Balance=", _econ_balance())
+			print("[TileBoard] Economy/Minerals resolved: ", _minerals.name, "  Balance=", _econ_balance())
 		else:
-			print("[TileBoard] Minerals NOT found; turret placement is FREE.")
+			print("[TileBoard] Minerals NOT found; placement is FREE.")
 
 func _econ_balance() -> int:
 	if _minerals == null:
 		return 0
-
-	var v: Variant = null
-	if _minerals.has_method("get"):
-		v = _minerals.get("minerals")
-
+	# Preferred: Economy.balance()
+	if _minerals.has_method("balance"):
+		return int(_minerals.call("balance"))
+	# Fallback: property on a Minerals node
+	var v: Variant = _minerals.get("minerals")  # explicit Variant fixes the ':=' inference error
 	if typeof(v) == TYPE_INT:
 		return int(v)
 	return 0
 
-
 func _econ_can_afford(cost_val: int) -> bool:
 	if cost_val <= 0 or _minerals == null:
 		return true
+	# Preferred: Economy.can_afford()
 	if _minerals.has_method("can_afford"):
 		var ok := bool(_minerals.call("can_afford", cost_val))
 		if econ_debug:
 			print("[TileBoard] can_afford? cost=", cost_val, " -> ", ok, " (bal=", _econ_balance(), ")")
 		return ok
+	# Fallback: compare against balance
 	var ok2 := cost_val <= _econ_balance()
 	if econ_debug:
 		print("[TileBoard] can_afford? (fallback) cost=", cost_val, " -> ", ok2, " (bal=", _econ_balance(), ")")
@@ -149,19 +156,22 @@ func _econ_spend(cost_val: int) -> bool:
 	if cost_val <= 0 or _minerals == null:
 		return true
 	var ok := true
-	if _minerals.has_method("spend"):
+	# Preferred: Economy.try_spend(cost, reason)
+	if _minerals.has_method("try_spend"):
+		ok = bool(_minerals.call("try_spend", cost_val, "tileboard_build"))
+	# Next: Minerals.spend(cost)
+	elif _minerals.has_method("spend"):
 		ok = bool(_minerals.call("spend", cost_val))
+	# Next: set_amount(bal - cost)
 	elif _minerals.has_method("set_amount"):
 		var bal := _econ_balance()
-		if bal < cost_val:
-			ok = false
-		else:
-			_minerals.call("set_amount", bal - cost_val)
+		if bal < cost_val: ok = false
+		else: _minerals.call("set_amount", bal - cost_val)
 	else:
 		# No spend API; do not silently charge.
 		ok = _econ_balance() >= cost_val
 		if ok and econ_debug:
-			print("[TileBoard] WARN: Minerals has no spend/set_amount; NOT deducting.")
+			print("[TileBoard] WARN: No spend API; NOT deducting.")
 	if econ_debug:
 		print("[TileBoard] spend cost=", cost_val, " -> ", ok, " (bal=", _econ_balance(), ")")
 	return ok
@@ -178,11 +188,11 @@ func _placement_succeeded(tile: Node, action: String) -> bool:
 		"turret":
 			if tile.has_method("has_turret"):
 				return bool(tile.call("has_turret"))
-			if tile.has_method("get"):
-				var v = tile.get("has_turret")
-				if typeof(v) == TYPE_BOOL:
-					return bool(v)
-			# fallback heuristic
+			# property fallback
+			var v: Variant = tile.get("has_turret")
+			if typeof(v) == TYPE_BOOL:
+				return bool(v)
+			# final heuristic
 			var tower := tile.find_child("Tower", true, false)
 			return tower != null
 		_:

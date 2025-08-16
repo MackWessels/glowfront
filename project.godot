@@ -14,3 +14,7 @@ config/name="GlowFront"
 run/main_scene="uid://b8msl4kqjlhan"
 config/features=PackedStringArray("4.4", "Forward Plus")
 config/icon="res://icon.svg"
+
+[autoload]
+
+Economy="*res://scripts/economy.gd"
