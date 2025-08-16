@@ -14,3 +14,4 @@ res://scenes/elite_enemy.tscn
 res://scenes/economy.tscn
 res://scripts/economy.gd
 res://scenes/minerals.gd
+res://scenes/minerals_hud.gd
