@@ -22,9 +22,6 @@ signal health_changed(current: int, maxv: int)
 
 # ---------------- economy ----------------
 @export var bounty: int = 5
-@export var minerals_node_path: NodePath
-@export var econ_debug: bool = true
-var _minerals: Node = null
 
 # ---------------- turret avoidance ----------------
 @export var avoid_turrets: bool = true
@@ -93,8 +90,6 @@ func _ready() -> void:
 	add_to_group("enemies", true)
 	if is_elite:
 		add_to_group("elite_enemies", true)
-
-	_econ_resolve()
 
 # ---------- idle API (replaces pause) ----------
 func set_idle(on: bool, seconds: float = -1.0) -> void:
@@ -484,40 +479,22 @@ func _get_tile_size() -> float:
 		return float(v)
 	return 1.0
 
-# ---------------- economy helpers ----------------
-func _econ_resolve() -> void:
-	if minerals_node_path != NodePath(""):
-		_minerals = get_node_or_null(minerals_node_path)
-	if _minerals == null:
-		_minerals = get_node_or_null("/root/Economy")
-	if _minerals == null:
-		_minerals = get_node_or_null("/root/Minerals")
-	if _minerals == null:
-		var root: Window = get_tree().root
-		if root != null:
-			_minerals = root.find_child("Minerals", true, false)
-	if econ_debug:
-		if _minerals:
-			print("[Enemy] Minerals resolved -> ", _minerals.name)
-		else:
-			print("[Enemy] Minerals NOT found; bounty ignored.")
-
+# ---------------- economy helpers (autoload) ----------------
 func _econ_add(amount: int, source: String) -> void:
-	if amount == 0 or _minerals == null:
+	if amount == 0:
 		return
-	if _minerals.has_method("add"):
-		_minerals.call("add", amount, source)
-	elif _minerals.has_method("deposit"):
-		_minerals.call("deposit", amount)
-	elif _minerals.has_method("set_amount"):
-		var v: Variant = _minerals.get("minerals")
+	# Call the Economy autoload directly, without any prints.
+	if Economy.has_method("add"):
+		Economy.call("add", amount, source)
+	elif Economy.has_method("deposit"):
+		Economy.call("deposit", amount)
+	elif Economy.has_method("set_amount"):
+		var v: Variant = Economy.get("minerals")
 		var cur: int = 0
 		if typeof(v) == TYPE_INT:
 			cur = int(v)
-		_minerals.call("set_amount", cur + amount)
+		Economy.call("set_amount", cur + amount)
 	else:
-		var v2: Variant = _minerals.get("minerals")
+		var v2: Variant = Economy.get("minerals")
 		if typeof(v2) == TYPE_INT:
-			_minerals.set("minerals", int(v2) + amount)
-	if econ_debug:
-		print("[Enemy] bounty +", amount, " (", source, ")")
+			Economy.set("minerals", int(v2) + amount)

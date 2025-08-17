@@ -1,86 +1,45 @@
 extends Node
 
-# ---------- signals ----------
+# signals 
 signal changed()
 signal upgrade_purchased(id: String, new_level: int, next_cost: int)
-signal powerup_started(id: String)
-signal powerup_ended(id: String)
 
-@export var econ_path: NodePath
-@export var debug: bool = true
-
-# ---------- economy ----------
-var _econ: Node = null
-
-func _ready() -> void:
-	_resolve_econ()
-	set_process(true)
-
-func _resolve_econ() -> void:
-	if econ_path != NodePath(""):
-		_econ = get_node_or_null(econ_path)
-	if _econ == null:
-		_econ = get_node_or_null("/root/Economy")
-	if _econ == null:
-		_econ = get_node_or_null("/root/Minerals")
-	if debug:
-		print("[PowerUps] economy resolved -> ", _econ)
-
+# economy
 func balance() -> int:
-	if _econ == null: return 0
-	if _econ.has_method("balance"): return int(_econ.call("balance"))
-	var v: Variant = _econ.get("minerals")
-	if typeof(v) == TYPE_INT: return int(v)
+	if Economy.has_method("balance"):
+		return int(Economy.call("balance"))
+	var v: Variant = Economy.get("minerals")
+	if typeof(v) == TYPE_INT:
+		return int(v)
 	return 0
 
 func _try_spend(cost: int, reason: String = "") -> bool:
-	if _econ == null: return false
-	if _econ.has_method("try_spend"): return bool(_econ.call("try_spend", cost, reason))
-	if _econ.has_method("spend"):     return bool(_econ.call("spend", cost))
-	if _econ.has_method("set_amount"):
+	if cost <= 0:
+		return true
+	if Economy.has_method("try_spend"):
+		return bool(Economy.call("try_spend", cost, reason))
+	if Economy.has_method("spend"):
+		return bool(Economy.call("spend", cost))
+	if Economy.has_method("set_amount"):
 		var b: int = balance()
-		if b < cost: return false
-		_econ.call("set_amount", b - cost)
+		if b < cost:
+			return false
+		Economy.call("set_amount", b - cost)
 		return true
 	return balance() >= cost
 
-# ---------- optional: timed powerups ----------
-var _time: float = 0.0
-var _active: Dictionary = {}   # id -> {"expires_at": float, "data": Dictionary}
-
-func _process(delta: float) -> void:
-	_time += delta
-	var ended: Array[String] = []
-	for id in _active.keys():
-		var exp: float = float((_active[id] as Dictionary).get("expires_at", 0.0))
-		if exp > 0.0 and _time >= exp:
-			ended.append(id)
-	for id in ended:
-		_active.erase(id)
-		powerup_ended.emit(id)
-	if ended.size() > 0:
-		changed.emit()
-
-func activate(id: String, duration_sec: float, data: Dictionary) -> void:
-	var expires_at: float = ( _time + duration_sec ) if duration_sec > 0.0 else 0.0
-	_active[id] = {"expires_at": expires_at, "data": data}
-	powerup_started.emit(id)
-	changed.emit()
-	if debug:
-		print("[PowerUps] activated '", id, "' for ", duration_sec, "s -> ", data)
-
-# ---------- repeatable upgrades ----------
+# repeatable upgrades 
 @export var upgrades_config: Dictionary = {
 	"turret_damage": {
-		"base_cost": 20,      # first purchase
-		"cost_factor": 1.25,  # geometric growth per level
-		"cost_round_to": 1,   # round to nearest N (1/5/10)
-		"per_level_pct": 10.0,# +% damage per level
+		"base_cost": 20,      
+		"cost_factor": 1.25, 
+		"cost_round_to": 1,   
+		"per_level_pct": 10.0,
 		"max_level": 0        # 0 = unlimited
 	}
 }
 
-var _upgrades_state: Dictionary = {}   # id -> {"level": int}
+var _upgrades_state: Dictionary = {}  
 
 func upgrade_level(id: String) -> int:
 	var e: Dictionary = _upgrades_state.get(id, {}) as Dictionary
@@ -128,18 +87,14 @@ func purchase(id: String) -> bool:
 	if cost < 0:
 		return false
 	if not _try_spend(cost, "upgrade:" + id):
-		if debug:
-			print("[PowerUps] purchase FAILED '", id, "' need=", cost, " bal=", balance())
 		return false
 	_upgrades_state[id] = {"level": lvl + 1}
 	var next_cost: int = upgrade_cost(id)
 	changed.emit()
 	upgrade_purchased.emit(id, lvl + 1, next_cost)
-	if debug:
-		print("[PowerUps] purchased '", id, "' -> level=", (lvl + 1), " next_cost=", next_cost)
 	return true
 
-# ---------- effects ----------
+# effects
 func turret_damage_multiplier() -> float:
 	var conf: Dictionary = upgrades_config.get("turret_damage", {}) as Dictionary
 	var lvl: int = upgrade_level("turret_damage")
@@ -148,14 +103,9 @@ func turret_damage_multiplier() -> float:
 	var per: float = float(conf.get("per_level_pct", 0.0)) / 100.0
 	return pow(1.0 + per, float(lvl))
 
-# Combine upgrades + any timed buffs (if you use them)
+
 func damage_multiplier(kind: String = "") -> float:
 	var mult: float = 1.0
 	if kind == "turret" or kind == "":
 		mult *= turret_damage_multiplier()
-	for id in _active.keys():
-		var data: Dictionary = (_active[id] as Dictionary).get("data", {}) as Dictionary
-		var kinds: Array = data.get("damage_kinds", [])
-		if kinds.is_empty() or kinds.has(kind) or kind == "":
-			mult *= 1.0 + float(data.get("damage_pct", 0.0)) / 100.0
 	return mult
