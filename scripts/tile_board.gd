@@ -13,8 +13,8 @@ extends Node3D
 # --- Minerals / economy ---
 @export var minerals_node_path: NodePath       
 @export var turret_cost: int = 10             
-@export var econ_debug: bool = true             # print to console
-var _minerals: Node = null                      # can point to Economy autoload or a Minerals node
+@export var econ_debug: bool = true             
+var _minerals: Node = null                      
 
 signal global_path_changed
 
@@ -574,6 +574,7 @@ func get_spawn_gate(span: int = -1) -> Dictionary:
 		normal = Vector2i(0, -1)
 		lateral = Vector2i(1, 0)
 
+	@warning_ignore("integer_division")
 	var half_i: int = int(span / 2)
 	var cells: Array[Vector2i] = []
 	for i in range(-half_i, half_i + 1):
@@ -623,7 +624,7 @@ func spawn_lane_cells(span: int = -1) -> Array[Vector2i]:
 		cells.append(world_to_cell(pw))
 	return cells
 
-# ---- PowerUps cost adapter (discounts etc.) ----
+# PowerUps cost adapter 
 func _power_cost_for(action: String) -> int:
 	var base := _cost_for_action(action)
 	var pu := get_node_or_null("/root/PowerUps")

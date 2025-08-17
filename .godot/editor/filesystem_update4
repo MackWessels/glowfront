@@ -1,4 +1,5 @@
 res://scenes/main.tscn
+res://scripts/enemy.gd
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
 res://scenes/enemy_spawner.tscn
@@ -9,6 +10,4 @@ res://scenes/goal.tscn
 res://scenes/projectile.tscn
 res://scenes/elite_enemy.tscn
 res://scenes/economy.tscn
-res://scripts/tower.gd
-res://scripts/enemy.gd
-res://scripts/enemy_spawner.gd
+res://scripts/tile_board.gd

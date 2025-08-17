@@ -14,17 +14,22 @@ extends CharacterBody3D
 @export var is_elite: bool = false
 
 # ---------------- health / combat ----------------
-@export var max_health: int = 2           # lowered default so enemies feel less tanky
-@export var armor_pct: float = 0.0        # 0.0–0.95 percent-based reduction
+@export var max_health: int = 2            # lighter default HP
+@export var armor_pct: float = 0.0         # 0.0–0.95 percent-based reduction
 var health: int = 1
 signal died
 signal health_changed(current: int, maxv: int)
 
 # ---------------- economy ----------------
-@export var bounty: int = 5                        # minerals awarded on kill
-@export var minerals_node_path: NodePath           # optional explicit reference
+@export var bounty: int = 5
+@export var minerals_node_path: NodePath
 @export var econ_debug: bool = true
 var _minerals: Node = null
+
+# ---------------- turret avoidance ----------------
+@export var avoid_turrets: bool = true
+@export var avoid_radius_tiles: float = 1.0     # influence radius in tiles
+@export var avoid_strength_tiles: float = 0.10  # ~10% tile/sec push
 
 # ---------------- entry step targeting ----------------
 const ENTRY_RADIUS_DEFAULT: float = 0.20
@@ -40,8 +45,12 @@ const EPS: float = 0.0001
 # ---------------- state ----------------
 var _board: Node = null
 var _knockback: Vector3 = Vector3.ZERO
-var _paused: bool = false
+var _paused: bool = false        # kept for back-compat; maps to idle
 var _dead: bool = false
+
+# Idle state
+var _idle: bool = false
+var _idle_timer: float = -1.0     # <0 = indefinite idle
 
 # Y-plane lock
 var _y_lock_enabled: bool = true
@@ -63,12 +72,6 @@ var _ghost_until_entry: bool = false
 var _saved_layer: int = 0
 var _saved_mask: int = 0
 
-# health bar
-const _HB_SIZE: Vector2   = Vector2(0.6, 0.08)
-const _HB_OFFSET_Y: float = 0.9
-var _hb_root: Node3D = null
-var _hb_bar: MeshInstance3D = null
-
 func _ready() -> void:
 	motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
 	floor_snap_length = 0.0
@@ -76,8 +79,8 @@ func _ready() -> void:
 	health = max_health
 
 	if tile_board_path != NodePath(""):
-		var n := get_node_or_null(tile_board_path)
-		if n:
+		var n: Node = get_node_or_null(tile_board_path)
+		if n != null:
 			_board = n
 		else:
 			push_warning("Enemy: tile_board_path not found: %s" % [tile_board_path])
@@ -86,20 +89,27 @@ func _ready() -> void:
 		_y_plane = global_position.y
 		_y_plane_set = true
 
-	add_to_group("enemy", true)       # keep both for compatibility
+	add_to_group("enemy", true)
 	add_to_group("enemies", true)
 	if is_elite:
 		add_to_group("elite_enemies", true)
 
 	_econ_resolve()
-	_build_healthbar()
 
+# ---------- idle API (replaces pause) ----------
+func set_idle(on: bool, seconds: float = -1.0) -> void:
+	_idle = on
+	_idle_timer = seconds
+	_paused = on   # legacy sync
+
+func idle_for(seconds: float) -> void:
+	set_idle(true, seconds)
+
+# Back-compat shim
 func set_paused(p: bool) -> void:
-	_paused = p
+	set_idle(p)
 
 # ---------------- damage / death ----------------
-# Accepts either an int or a Dictionary context:
-# { base:int, flat_bonus:int, mult:float, crit_chance:float, crit_mult:float, tags:Array[String] }
 func take_damage(d) -> void:
 	if _dead:
 		return
@@ -115,7 +125,6 @@ func take_damage(d) -> void:
 
 	health = max(health - dmg, 0)
 	emit_signal("health_changed", health, max_health)
-	_update_healthbar()
 
 	if health <= 0:
 		_die_with_reward(true)  # killed by damage -> award bounty
@@ -139,23 +148,21 @@ func _compute_damage_from_ctx(ctx: Dictionary) -> int:
 	var final_amount: int = int(floor(maxf(1.0, reduced)))
 	return final_amount
 
-
 func _die_with_reward(award: bool) -> void:
 	if _dead:
 		return
 	_dead = true
 
 	if award and bounty > 0:
-		var src := "elite_kill"
-		if not is_elite:
-			src = "kill"
+		var src: String = "kill"
+		if is_elite:
+			src = "elite_kill"
 		_econ_add(bounty, src)
 
 	emit_signal("died")
 	queue_free()
 
-# Public helper if something external despawns the enemy at the goal.
-# Reaching the goal gives NO bounty.
+# No bounty for reaching goal
 func on_reach_goal() -> void:
 	_die_with_reward(false)
 
@@ -166,7 +173,7 @@ func lock_y_to(y: float) -> void:
 	_y_lock_enabled = true
 
 	if abs(global_position.y - y) > EPS:
-		var p := global_position
+		var p: Vector3 = global_position
 		p.y = y
 		global_position = p
 
@@ -212,60 +219,70 @@ func _restore_collision_if_ghosting() -> void:
 		collision_mask  = _saved_mask
 
 func reset_for_spawn() -> void:
+	_idle = false
+	_idle_timer = -1.0
 	_paused = false
+
 	_dead = false
 	velocity = Vector3.ZERO
 	_knockback = Vector3.ZERO
 
 	health = max_health
 	emit_signal("health_changed", health, max_health)
-	_update_healthbar()
 
 # ---------------- physics ----------------
 func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
-	if _paused or _board == null:
-		velocity.x = 0.0
-		velocity.z = 0.0
+	# Idle / legacy paused / no board: stand still (with optional timed idle)
+	if _idle or _paused or _board == null:
+		if _idle and _idle_timer >= 0.0:
+			_idle_timer -= delta
+			if _idle_timer <= 0.0:
+				_idle = false
+				_paused = false
+
+		var cur_h: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+		cur_h = cur_h.move_toward(Vector3.ZERO, acceleration * delta)
+		velocity = Vector3(cur_h.x, 0.0, cur_h.z)
+
 		if abs(velocity.y) > EPS:
 			velocity.y = 0.0
 		_apply_y_lock()
 		move_and_slide()
-		_update_hb_height()
 		return
 
 	if _y_lock_enabled and not _y_plane_set:
 		_y_plane = global_position.y
 		_y_plane_set = true
 
-	# Entry step
+	# Entry step (pre-walk nudge)
 	if _entry_active:
 		_entry_elapsed += delta
 
-		var to_entry := _entry_point - global_position
+		var to_entry: Vector3 = _entry_point - global_position
 		to_entry.y = 0.0
-		var r := _entry_radius + EPS
+		var r: float = _entry_radius + EPS
 
 		if to_entry.length_squared() <= r * r:
 			_entry_active = false
 			_restore_collision_if_ghosting()
 		else:
-			var target_vel := Vector3.ZERO
+			var target_vel: Vector3 = Vector3.ZERO
 			if to_entry.length_squared() > EPS * EPS:
 				target_vel = to_entry.normalized() * speed
 
 			_move_horizontal_toward(target_vel, delta)
 
-			var dist_now := to_entry.length()
+			var dist_now: float = to_entry.length()
 			if dist_now > _entry_prev_dist - 0.02:
 				_entry_stuck_t += delta
 			else:
 				_entry_stuck_t = 0.0
 			_entry_prev_dist = dist_now
 
-			var horiz_speed := sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
+			var horiz_speed: float = sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
 			if horiz_speed < entry_stuck_speed:
 				_entry_stuck_t += delta
 
@@ -278,7 +295,6 @@ func _physics_process(delta: float) -> void:
 				_knockback = Vector3.ZERO
 				_restore_collision_if_ghosting()
 
-			_update_hb_height()
 			if _entry_active:
 				return
 
@@ -291,28 +307,30 @@ func _physics_process(delta: float) -> void:
 		return
 
 	# Flow-field steering
-	var dir := _get_flow_dir()
-	var target_vel := Vector3.ZERO
-	if dir != Vector3.ZERO:
-		target_vel = dir * speed
+	var dir_vec: Vector3 = _get_flow_dir()
+	var target_vel2: Vector3 = Vector3.ZERO
+	if dir_vec != Vector3.ZERO:
+		target_vel2 = dir_vec * speed
 
-	_move_horizontal_toward(target_vel, delta)
-	_update_hb_height()
+	# Add gentle push away from nearby turret
+	target_vel2 += _turret_avoidance_velocity()
+
+	_move_horizontal_toward(target_vel2, delta)
 
 func _move_horizontal_toward(target_vel: Vector3, delta: float) -> void:
-	var desired := Vector3(
+	var desired: Vector3 = Vector3(
 		target_vel.x + _knockback.x,
 		0.0,
 		target_vel.z + _knockback.z
 	)
 
-	var cur_h := Vector3(velocity.x, 0.0, velocity.z)
+	var cur_h: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
 	cur_h = cur_h.move_toward(desired, acceleration * delta)
 
-	var max_sq := max_speed * max_speed
-	var cur_sq := cur_h.length_squared()
+	var max_sq: float = max_speed * max_speed
+	var cur_sq: float = cur_h.length_squared()
 	if cur_sq > max_sq and cur_sq > EPS * EPS:
-		var scale := max_speed / sqrt(cur_sq)
+		var scale: float = max_speed / sqrt(cur_sq)
 		cur_h = cur_h * scale
 
 	velocity = Vector3(cur_h.x, 0.0, cur_h.z)
@@ -363,7 +381,7 @@ func _get_flow_dir() -> Vector3:
 
 	if standing_blocked:
 		var best: Vector2i = pos
-		var best_val: int = 1_000_000
+		var best_val: int = 1000000
 		for o: Vector2i in _board.ORTHO_DIRS:
 			var nb: Vector2i = pos + o
 			if _board.cost.has(nb):
@@ -379,76 +397,92 @@ func _get_flow_dir() -> Vector3:
 				return v2 / sqrt(L2b)
 		return Vector3.ZERO
 
-	var dir: Vector3 = _board.dir_field.get(pos, Vector3.ZERO)
-	dir.y = 0.0
-	var d2: float = dir.length_squared()
+	var dir_v: Vector3 = _board.dir_field.get(pos, Vector3.ZERO)
+	dir_v.y = 0.0
+	var d2: float = dir_v.length_squared()
 	if d2 > EPS * EPS:
-		return dir / sqrt(d2)
+		return dir_v / sqrt(d2)
 
 	return Vector3.ZERO
 
 # ---------- facing control ----------
 func _update_facing_from_velocity(delta: float) -> void:
-	var h := Vector3(velocity.x, 0.0, velocity.z)
-	var L2 := h.length_squared()
+	var h: Vector3 = Vector3(velocity.x, 0.0, velocity.z)
+	var L2: float = h.length_squared()
 	if L2 <= EPS * EPS:
 		return
 
-	var desired_fwd := h / sqrt(L2)
-	var current_fwd := -global_transform.basis.z
+	var desired_fwd: Vector3 = h / sqrt(L2)
+	var current_fwd: Vector3 = -global_transform.basis.z
 	current_fwd.y = 0.0
-	var cf2 := current_fwd.length_squared()
+	var cf2: float = current_fwd.length_squared()
 	if cf2 > EPS * EPS:
 		current_fwd /= sqrt(cf2)
 	else:
 		current_fwd = Vector3.FORWARD
 
-	var angle := current_fwd.signed_angle_to(desired_fwd, Vector3.UP)
-	var max_step := deg_to_rad(turn_speed_deg) * delta
-	if angle > max_step:
-		angle = max_step
-	elif angle < -max_step:
-		angle = -max_step
-
+	var angle: float = current_fwd.signed_angle_to(desired_fwd, Vector3.UP)
+	var max_step: float = deg_to_rad(turn_speed_deg) * delta
+	angle = clamp(angle, -max_step, max_step)
 	rotate_y(angle)
 
-# ---------------- healthbar ----------------
-func _build_healthbar() -> void:
-	_hb_root = Node3D.new()
-	add_child(_hb_root)
-	_update_hb_height()
+# ---------------- turret avoidance helpers ----------------
+func _turret_avoidance_velocity() -> Vector3:
+	if not avoid_turrets or _board == null:
+		return Vector3.ZERO
 
-	var quad := QuadMesh.new()
-	quad.size = _HB_SIZE
+	var tile_size: float = _get_tile_size()
+	var radius: float = avoid_radius_tiles * tile_size
+	if radius < EPS:
+		radius = EPS
 
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1, 0.1, 0.1, 1.0)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.disable_receive_shadows = true
-	mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
+	var strength: float = avoid_strength_tiles * tile_size
+	if strength < 0.0:
+		strength = 0.0
 
-	_hb_bar = MeshInstance3D.new()
-	_hb_bar.mesh = quad
-	_hb_bar.material_override = mat
-	_hb_root.add_child(_hb_bar)
+	var nearest_pos: Vector3 = Vector3.ZERO
+	var best_d2: float = 1.0e18
+	var found: bool = false
 
-	_update_healthbar()
+	for n in _get_turret_nodes():
+		if n is Node3D:
+			var p: Vector3 = (n as Node3D).global_position
+			var v: Vector3 = global_position - p
+			v.y = 0.0
+			var d2: float = v.length_squared()
+			if d2 < radius * radius and d2 < best_d2:
+				best_d2 = d2
+				nearest_pos = p
+				found = true
 
-func _update_hb_height() -> void:
-	var base_y := global_position.y
-	if _y_plane_set:
-		base_y = _y_plane
-	_hb_root.global_position = Vector3(global_position.x, base_y + _HB_OFFSET_Y, global_position.z)
+	if not found:
+		return Vector3.ZERO
 
-func _update_healthbar() -> void:
-	if _hb_bar == null:
-		return
-	var t: float = 0.0
-	if max_health > 0:
-		t = float(health) / float(max_health)
-	t = clampf(t, 0.0, 1.0)
-	_hb_bar.scale = Vector3(t, 1.0, 1.0)
+	var d: float = sqrt(best_d2)
+	var away: Vector3 = global_position - nearest_pos
+	away.y = 0.0
+	if d <= EPS:
+		away = Vector3(1, 0, 0)  # arbitrary push if overlapping
+	else:
+		away /= d
+
+	# Full push at contact, fades to 0 at radius.
+	var falloff: float = 1.0 - clampf(d / radius, 0.0, 1.0)
+	return away * (strength * falloff)
+
+func _get_turret_nodes() -> Array:
+	var arr: Array = []
+	arr.append_array(get_tree().get_nodes_in_group("turret"))
+	arr.append_array(get_tree().get_nodes_in_group("turrets"))
+	return arr
+
+func _get_tile_size() -> float:
+	if _board == null:
+		return 1.0
+	var v: Variant = _board.get("tile_size")
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return float(v)
+	return 1.0
 
 # ---------------- economy helpers ----------------
 func _econ_resolve() -> void:
@@ -459,8 +493,8 @@ func _econ_resolve() -> void:
 	if _minerals == null:
 		_minerals = get_node_or_null("/root/Minerals")
 	if _minerals == null:
-		var root := get_tree().root
-		if root:
+		var root: Window = get_tree().root
+		if root != null:
 			_minerals = root.find_child("Minerals", true, false)
 	if econ_debug:
 		if _minerals:
