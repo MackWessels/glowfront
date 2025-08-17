@@ -109,7 +109,7 @@ shadow_mesh = SubResource("ArrayMesh_dd7d4")
 radius = 5.0
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ay4al"]
-size = Vector3(2, 1.739, 2)
+size = Vector3(1.13016, 1.29345, 1.26819)
 
 [node name="Tower" type="Node3D" groups=["turrets"]]
 script = ExtResource("1_2x682")
@@ -154,5 +154,5 @@ collision_layer = 32
 collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.476672, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0063324, 0.253899, 0.0244751)
 shape = SubResource("BoxShape3D_ay4al")

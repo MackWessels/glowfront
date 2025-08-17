@@ -25,8 +25,8 @@ signal health_changed(current: int, maxv: int)
 
 # ---------------- turret avoidance ----------------
 @export var avoid_turrets: bool = true
-@export var avoid_radius_tiles: float = 1.0     # influence radius in tiles
-@export var avoid_strength_tiles: float = 0.10  # ~10% tile/sec push
+@export var avoid_radius_tiles: float = 1.1     # influence radius in tiles
+@export var avoid_strength_tiles: float = 0.8  # ~10% tile/sec push
 
 # ---------------- entry step targeting ----------------
 const ENTRY_RADIUS_DEFAULT: float = 0.20

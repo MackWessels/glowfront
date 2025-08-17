@@ -1,9 +1,11 @@
-[gd_scene load_steps=8 format=3 uid="uid://b8msl4kqjlhan"]
+[gd_scene load_steps=10 format=3 uid="uid://b8msl4kqjlhan"]
 
 [ext_resource type="Script" uid="uid://43uec7mcm20v" path="res://scripts/main.gd" id="1_0wfyh"]
+[ext_resource type="Script" uid="uid://dua44e6q1q1yx" path="res://scenes/camera_control.gd" id="2_tefeu"]
 [ext_resource type="PackedScene" uid="uid://b3dnbvtjgt0fw" path="res://scenes/tile_board.tscn" id="3_jyhfs"]
 [ext_resource type="Script" uid="uid://cs3kgqtfo1kyb" path="res://scenes/minerals.gd" id="3_sugp2"]
 [ext_resource type="Script" uid="uid://bknoja7kjw7tr" path="res://scenes/minerals_hud.gd" id="4_jyhfs"]
+[ext_resource type="Script" uid="uid://bkopvmx0jqqr4" path="res://scenes/power_ups_hud.gd" id="5_tbgi4"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7dm0k"]
 sky_top_color = Color(0.517647, 0.788235, 1, 1)
@@ -24,6 +26,7 @@ script = ExtResource("1_0wfyh")
 [node name="OverheadCamera" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.34202, 0.939693, 0, -0.939693, 0.34202, 9, 12, 16)
 current = true
+script = ExtResource("2_tefeu")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-4.37114e-08, -0.707107, 0.707107, 0, 0.707107, 0.707107, -1, 3.09086e-08, -3.09086e-08, 15.0105, 15, -0.0108695)
@@ -37,18 +40,23 @@ environment = SubResource("Environment_7dm0k")
 [node name="Minerals" type="Node" parent="."]
 script = ExtResource("3_sugp2")
 
-[node name="MineralsHUD" type="CanvasLayer" parent="."]
+[node name="MineralsHUD" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
 script = ExtResource("4_jyhfs")
+value_label_path = NodePath("ValueLabel")
 
-[node name="HBoxContainer" type="HBoxContainer" parent="MineralsHUD"]
+[node name="ValueLabel" type="Label" parent="MineralsHUD"]
+offset_left = 4.0
+offset_top = 8.0
+offset_right = 103.0
+offset_bottom = 31.0
+text = "\"Minerals: 0\""
+
+[node name="PowerUpsHUD" type="CanvasLayer" parent="."]
+script = ExtResource("5_tbgi4")
+
+[node name="GridContainer" type="GridContainer" parent="PowerUpsHUD"]
 offset_right = 40.0
 offset_bottom = 40.0
-
-[node name="TextureRect" type="TextureRect" parent="MineralsHUD/HBoxContainer"]
-layout_mode = 2
-expand_mode = 1
-stretch_mode = 3
-
-[node name="ValueLabel" type="Label" parent="MineralsHUD/HBoxContainer"]
-layout_mode = 2
-text = "\"Minerals: 0\""
+columns = 2

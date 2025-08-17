@@ -1,9 +1,10 @@
+CanvasLayer
+GridContainer
+Control
 Label
 TextureRect
 HBoxContainer
-CanvasLayer
 Node
-Control
 CollisionShape3D
 CharacterBody3D
 StaticBody3D
@@ -11,4 +12,3 @@ Node3D
 Area3D
 PathFollow3D
 Path3D
-MeshInstance3D
