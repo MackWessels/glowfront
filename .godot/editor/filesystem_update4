@@ -11,3 +11,4 @@ res://scenes/projectile.tscn
 res://scenes/elite_enemy.tscn
 res://scenes/economy.tscn
 res://scripts/tile_board.gd
+res://scripts/enemy_spawner.gd

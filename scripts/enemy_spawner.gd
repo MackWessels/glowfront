@@ -4,13 +4,13 @@ extends Node3D
 @export var elite_enemy_scene: PackedScene
 @export var tile_board_path: NodePath = ^".."
 
-#  Pool / population 
+#  Pool / population
 @export var pool_size: int = 24
 @export var elite_pool_size: int = 8
 @export var max_active: int = 16
-@export var entry_crowd_limit: int = 2  
+@export var entry_crowd_limit: int = 2
 
-#  Wave settings 
+#  Wave settings
 @export var auto_start: bool = true
 @export var intermission: float = 4.0
 @export var wave_size_base: int = 8
@@ -26,7 +26,7 @@ extends Node3D
 @export var hp_growth_per_wave: float = 1.10
 @export var speed_growth_per_wave: float = 1.02
 
-# Spawn placement tuning 
+# Spawn placement tuning
 const ENTRY_MARGIN: float            = 0.18
 const LATERAL_JITTER_RATIO: float    = 0.20
 const LATERAL_JITTER_MIN: float      = 0.06
@@ -34,18 +34,18 @@ const LATERAL_JITTER_MAX: float      = 0.35
 const SPAWN_BEHIND_TILE_RATIO: float = 0.65
 const ENTRY_DEPTH_TILE_RATIO: float  = 0.3
 
-#  Signals 
+#  Signals
 signal wave_started(wave: int, size: int)
 signal wave_cleared(wave: int)
 
-# Internals 
+# Internals
 var _board: Node3D = null
 var _pool_basic: Array[CharacterBody3D] = []
 var _pool_elite: Array[CharacterBody3D] = []
 var _active: Array[CharacterBody3D] = []
 
 var _ts: float = 2.0
-var _paused: bool = false
+var _idle: bool = false   # replaces _paused (same behavior)
 
 enum { BETWEEN, SPAWNING, WAITING }
 var _state: int = BETWEEN
@@ -61,7 +61,7 @@ func _ready() -> void:
 	randomize()
 
 	if has_node(tile_board_path):
-		var n := get_node(tile_board_path)
+		var n: Node = get_node(tile_board_path)
 		if n is Node3D:
 			_board = n as Node3D
 	if _board == null:
@@ -91,7 +91,7 @@ func _build_pool_generic(scene: PackedScene, count: int, into: Array) -> void:
 	if scene == null:
 		return
 	for i in range(count):
-		var e := scene.instantiate() as CharacterBody3D
+		var e: CharacterBody3D = scene.instantiate() as CharacterBody3D
 		if e == null:
 			push_error("EnemySpawner: scene must be a CharacterBody3D.")
 			return
@@ -152,7 +152,7 @@ func _release_enemy(e: CharacterBody3D) -> void:
 		return
 	_active.erase(e)
 	_deactivate_enemy(e)
-	var is_elite := false
+	var is_elite: bool = false
 	if e.has_meta("elite"):
 		is_elite = bool(e.get_meta("elite"))
 	if is_elite:
@@ -188,7 +188,7 @@ func _activate_enemy(e: CharacterBody3D) -> void:
 # Wave FSM
 # -----------------------------
 func _physics_process(delta: float) -> void:
-	if _paused or _board == null:
+	if _idle or _board == null:
 		return
 
 	# Scrub references
@@ -208,12 +208,12 @@ func _physics_process(delta: float) -> void:
 				_spawn_cooldown -= delta
 			else:
 				if _to_spawn > 0 and _active.size() < max_active:
-					var lane := _choose_lane_with_room()
+					var lane: int = _choose_lane_with_room()
 					if lane != 999:
-						var is_elite := false
+						var is_elite: bool = false
 						if not _plan.is_empty():
 							is_elite = _plan.pop_front()
-						var e := _acquire_enemy(is_elite)
+						var e: CharacterBody3D = _acquire_enemy(is_elite)
 						if e != null:
 							_spawn_enemy(e, lane, is_elite)
 							_to_spawn -= 1
@@ -232,21 +232,10 @@ func _start_next_wave() -> void:
 	_plan = _build_wave_plan(_wave)
 	_to_spawn = _plan.size()
 
-	# --- NEW: log projected HP for this wave ---
-	var base_basic := _peek_base_hp(false)
-	var base_elite := _peek_base_hp(true)
-	var hp_basic := _predict_hp_for_wave(base_basic, _wave)
-	if elite_enemy_scene != null:
-		var hp_elite := _predict_hp_for_wave(base_elite, _wave)
-		print("[Wave ", _wave, "] enemy HP=", hp_basic, " | elite HP=", hp_elite)
-	else:
-		print("[Wave ", _wave, "] enemy HP=", hp_basic, " | elite HP=N/A")
-	# ------------------------------------------
-
+	# (debug logging removed)
 	emit_signal("wave_started", _wave, _to_spawn)
 	_state = SPAWNING
 	_spawn_cooldown = float(max(0.0, wave_first_spawn_delay))
-
 
 func _calc_wave_size(w: int) -> int:
 	var steps: int = w - 1
@@ -258,15 +247,16 @@ func _calc_wave_size(w: int) -> int:
 	return size
 
 func _build_wave_plan(wave: int) -> Array[bool]:
-	var size := _calc_wave_size(wave)
+	var size: int = _calc_wave_size(wave)
 	if size <= 0:
 		return []
 
-	var elites := 0
+	var elites: int = 0
 	if elite_enemy_scene and wave >= elite_start_wave:
 		elites = int(floor(float(wave - elite_start_wave) / float(max(1, elite_every_n_waves)))) + 1
 		elites = clamp(elites, 0, elite_cap_per_wave)
-	elites = min(elites, size)
+	if elites > size:
+		elites = size
 
 	var plan: Array[bool] = []
 	if elites == 0:
@@ -274,9 +264,9 @@ func _build_wave_plan(wave: int) -> Array[bool]:
 			plan.append(false)
 		return plan
 
-	var interval := float(size) / float(elites + 1)
-	var next_elite_at := int(round(interval)) - 1
-	var remaining := elites
+	var interval: float = float(size) / float(elites + 1)
+	var next_elite_at: int = int(round(interval)) - 1
+	var remaining: int = elites
 
 	for i in range(size):
 		if remaining > 0 and i == next_elite_at:
@@ -300,13 +290,13 @@ func _choose_lane_with_room() -> int:
 		return 0
 
 	var lanes: Array = []
-	var mid := int(centers.size() / 2)
+	var mid: int = int(centers.size() / 2)
 	for i in range(centers.size()):
 		var p: Vector3 = centers[i]
 		var c: Vector2i = _board.world_to_cell(p)
 		lanes.append({ "lane": i - mid, "cell": c })
 
-	var nodes_group := get_tree().get_nodes_in_group("enemies")
+	var nodes_group: Array = get_tree().get_nodes_in_group("enemies")
 	if nodes_group.is_empty():
 		nodes_group = get_tree().get_nodes_in_group("enemy")
 	var nodes: Array = nodes_group
@@ -315,22 +305,22 @@ func _choose_lane_with_room() -> int:
 		for en in _active:
 			nodes.append(en)
 
-	var best_lane := 999
-	var best_basic := 999
+	var best_lane: int = 999
+	var best_basic: int = 999
 
 	for item in lanes:
 		var lane_i: int = item["lane"]
 		var cell: Vector2i = item["cell"]
 
-		# skip if tile is pending/blue 
+		# skip if tile is pending/blue
 		if _is_tile_blocked_for_spawn(cell):
 			continue
 
-		var basic_count := 0
-		var elite_present := false
+		var basic_count: int = 0
+		var elite_present: bool = false
 
 		for obj in nodes:
-			var en := obj as Node3D
+			var en: Node3D = obj as Node3D
 			if en == null:
 				continue
 			if not en.visible:
@@ -338,7 +328,7 @@ func _choose_lane_with_room() -> int:
 			if _board.world_to_cell(en.global_position) != cell:
 				continue
 
-			var is_elite := false
+			var is_elite: bool = false
 			if en.has_meta("elite"):
 				is_elite = bool(en.get_meta("elite"))
 			elif en.has_method("is_elite"):
@@ -407,7 +397,7 @@ func _spawn_enemy(enemy: CharacterBody3D, lane_i: int, is_elite: bool) -> void:
 	if not centers.is_empty():
 		lane_center = centers[idx]
 
-	# placement & targets 
+	# placement & targets
 	var half: float = _ts * 0.5
 	var max_lat: float = float(max(0.0, half - ENTRY_MARGIN))
 
@@ -439,19 +429,22 @@ func _spawn_enemy(enemy: CharacterBody3D, lane_i: int, is_elite: bool) -> void:
 
 	_apply_wave_scaling(enemy, _wave)
 
-	# configure the entry
+	# configure the entry and ensure active
 	if enemy.has_method("set_entry_target"):
 		enemy.call("set_entry_target", entry_world, arrive_radius)
 	if enemy.has_method("reset_for_spawn"):
 		enemy.call("reset_for_spawn")
-	if enemy.has_method("set_paused"):
+	# prefer idle API, fall back to legacy pause
+	if enemy.has_method("set_idle"):
+		enemy.call("set_idle", false)
+	elif enemy.has_method("set_paused"):
 		enemy.call("set_paused", false)
 
 	_activate_enemy(enemy)
 	_active.append(enemy)
 
 # -----------------------------
-# Wave scaling 
+# Wave scaling
 # -----------------------------
 func _apply_wave_scaling(e: CharacterBody3D, wave: int) -> void:
 	if wave <= 1:
@@ -490,7 +483,7 @@ func _portal_spawn_basis() -> Array[Vector3]:
 	var info: Dictionary = _board.get_spawn_gate(3)
 	if info.has("lane_centers") and info.has("forward") and info.has("lateral"):
 		var centers: Array = info["lane_centers"]
-		var mid := int(centers.size() / 2)
+		var mid: int = int(centers.size() / 2)
 		var origin: Vector3 = _board.get_spawn_position()
 		if not centers.is_empty():
 			origin = centers[mid]
@@ -538,8 +531,12 @@ func _on_enemy_tree_exited(e: CharacterBody3D) -> void:
 	_pool_basic.erase(e)
 	_pool_elite.erase(e)
 
+# Idle/Resume spawning (compat with old API name)
+func set_idle(on: bool) -> void:
+	_idle = on
+
 func pause_spawning(p: bool) -> void:
-	_paused = p
+	_idle = p   # legacy alias
 
 # -----------------------------
 # Helpers
@@ -551,33 +548,31 @@ func _set_if_has_property(obj: Object, prop: String, value: Variant) -> void:
 			return
 
 func _peek_base_hp(is_elite: bool) -> int:
-	var pool = _pool_elite if is_elite else _pool_basic
+	var pool: Array = _pool_basic
+	if is_elite:
+		pool = _pool_elite
 	for e in pool:
 		if is_instance_valid(e):
-			# Prefer captured base HP
 			if e.has_meta("base_hp"):
 				return int(e.get_meta("base_hp"))
-
-			# Explicit Variant type to satisfy the typer
 			var v: Variant = e.get("max_health")
 			if typeof(v) == TYPE_INT:
 				return int(v)
 
-	# Fallback: instantiate once to read export
-	var scene: PackedScene = elite_enemy_scene if is_elite else enemy_scene
+	var scene: PackedScene = enemy_scene
+	if is_elite and elite_enemy_scene != null:
+		scene = elite_enemy_scene
 	if scene != null:
-		var tmp := scene.instantiate()
+		var tmp: Node = scene.instantiate()
 		if tmp != null:
 			var v2: Variant = tmp.get("max_health")
 			tmp.queue_free()
 			if typeof(v2) == TYPE_INT:
 				return int(v2)
-
 	return 0
-
 
 func _predict_hp_for_wave(base_hp: int, wave: int) -> int:
 	if wave <= 1:
 		return base_hp
-	var steps := wave - 1
+	var steps: int = wave - 1
 	return int(round(float(base_hp) * pow(hp_growth_per_wave, steps)))
