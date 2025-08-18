@@ -14,8 +14,8 @@ extends CharacterBody3D
 @export var is_elite: bool = false
 
 # ---------------- health / combat ----------------
-@export var max_health: int = 2            # lighter default HP
-@export var armor_pct: float = 0.0         # 0.0–0.95 percent-based reduction
+@export var max_health: int = 2          
+@export var armor_pct: float = 0.0         # percent-based reduction
 var health: int = 1
 signal died
 signal health_changed(current: int, maxv: int)
@@ -25,8 +25,8 @@ signal health_changed(current: int, maxv: int)
 
 # ---------------- turret avoidance ----------------
 @export var avoid_turrets: bool = true
-@export var avoid_radius_tiles: float = 1.1     # influence radius in tiles
-@export var avoid_strength_tiles: float = 0.8  # ~10% tile/sec push
+@export var avoid_radius_tiles: float = 1.1     
+@export var avoid_strength_tiles: float = 0.8  
 
 # ---------------- entry step targeting ----------------
 const ENTRY_RADIUS_DEFAULT: float = 0.20
@@ -42,7 +42,7 @@ const EPS: float = 0.0001
 # ---------------- state ----------------
 var _board: Node = null
 var _knockback: Vector3 = Vector3.ZERO
-var _paused: bool = false        # kept for back-compat; maps to idle
+var _paused: bool = false        # maps to idle
 var _dead: bool = false
 
 # Idle state
@@ -90,12 +90,14 @@ func _ready() -> void:
 	add_to_group("enemies", true)
 	if is_elite:
 		add_to_group("elite_enemies", true)
+	
+
 
 # ---------- idle API (replaces pause) ----------
 func set_idle(on: bool, seconds: float = -1.0) -> void:
 	_idle = on
 	_idle_timer = seconds
-	_paused = on   # legacy sync
+	_paused = on   
 
 func idle_for(seconds: float) -> void:
 	set_idle(true, seconds)
@@ -122,7 +124,7 @@ func take_damage(d) -> void:
 	emit_signal("health_changed", health, max_health)
 
 	if health <= 0:
-		_die_with_reward(true)  # killed by damage -> award bounty
+		_die_with_reward(true)  # killed by damage award bounty
 
 func _compute_damage_from_ctx(ctx: Dictionary) -> int:
 	var base: int = int(ctx.get("base", 0))
@@ -230,7 +232,7 @@ func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
-	# Idle / legacy paused / no board: stand still (with optional timed idle)
+	# Idle  stand still 
 	if _idle or _paused or _board == null:
 		if _idle and _idle_timer >= 0.0:
 			_idle_timer -= delta
@@ -252,7 +254,7 @@ func _physics_process(delta: float) -> void:
 		_y_plane = global_position.y
 		_y_plane_set = true
 
-	# Entry step (pre-walk nudge)
+	# Entry step 
 	if _entry_active:
 		_entry_elapsed += delta
 
@@ -293,13 +295,7 @@ func _physics_process(delta: float) -> void:
 			if _entry_active:
 				return
 
-	# Goal check — NO reward if reached
-	var goal_pos: Vector3 = _board.get_goal_position()
-	var to_goal: Vector3 = goal_pos - global_position
-	to_goal.y = 0.0
-	if to_goal.length_squared() <= goal_radius * goal_radius:
-		on_reach_goal()
-		return
+
 
 	# Flow-field steering
 	var dir_vec: Vector3 = _get_flow_dir()
@@ -457,7 +453,7 @@ func _turret_avoidance_velocity() -> Vector3:
 	var away: Vector3 = global_position - nearest_pos
 	away.y = 0.0
 	if d <= EPS:
-		away = Vector3(1, 0, 0)  # arbitrary push if overlapping
+		away = Vector3(1, 0, 0)  
 	else:
 		away /= d
 
@@ -483,7 +479,6 @@ func _get_tile_size() -> float:
 func _econ_add(amount: int, source: String) -> void:
 	if amount == 0:
 		return
-	# Call the Economy autoload directly, without any prints.
 	if Economy.has_method("add"):
 		Economy.call("add", amount, source)
 	elif Economy.has_method("deposit"):

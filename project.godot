@@ -19,3 +19,4 @@ config/icon="res://icon.svg"
 
 Economy="*res://scripts/economy.gd"
 PowerUps="*res://scripts/power_ups.gd"
+Health="*res://scripts/health.gd"

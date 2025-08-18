@@ -12,3 +12,8 @@ res://scenes/economy.tscn
 res://scenes/main_menu.gd
 res://scenes/main_menu.tscn
 res://scripts/main_menu.gd
+res://scripts/goal.gd
+res://health.gd
+res://scripts/enemy.gd
+res://scripts/health.gd
+res://scripts/main.gd
