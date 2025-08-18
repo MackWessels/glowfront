@@ -11,11 +11,11 @@ config_version=5
 [application]
 
 config/name="GlowFront"
-run/main_scene="uid://b8msl4kqjlhan"
+run/main_scene="uid://dwdo6442wh28n"
 config/features=PackedStringArray("4.4", "Forward Plus")
 config/icon="res://icon.svg"
 
 [autoload]
 
 Economy="*res://scripts/economy.gd"
-PowerUps="*res://power_ups.gd"
+PowerUps="*res://scripts/power_ups.gd"

@@ -21,7 +21,7 @@ turret_scene = ExtResource("2_ywnoi")
 wall_scene = ExtResource("3_jy7pm")
 
 [node name="TileMesh" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.2, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.0877134, 0)
 mesh = SubResource("BoxMesh_uiyn6")
 
 [node name="TileCollider" type="CollisionShape3D" parent="."]

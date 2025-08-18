@@ -4,6 +4,7 @@
 [ext_resource type="PackedScene" uid="uid://kjyp3nbsl47k" path="res://scenes/projectile.tscn" id="2_ay4al"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ofvlm"]
+albedo_color = Color(1, 1, 0.160784, 1)
 
 [sub_resource type="ArrayMesh" id="ArrayMesh_bdudl"]
 _surfaces = [{
@@ -38,6 +39,7 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_bdudl")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_byata"]
+albedo_color = Color(1, 1, 0.160784, 1)
 
 [sub_resource type="ArrayMesh" id="ArrayMesh_r8pos"]
 _surfaces = [{
@@ -72,6 +74,7 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_r8pos")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_lx0k1"]
+albedo_color = Color(1, 1, 0.160784, 1)
 
 [sub_resource type="ArrayMesh" id="ArrayMesh_dd7d4"]
 _surfaces = [{

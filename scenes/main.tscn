@@ -1,11 +1,11 @@
 [gd_scene load_steps=10 format=3 uid="uid://b8msl4kqjlhan"]
 
 [ext_resource type="Script" uid="uid://43uec7mcm20v" path="res://scripts/main.gd" id="1_0wfyh"]
-[ext_resource type="Script" uid="uid://dua44e6q1q1yx" path="res://scenes/camera_control.gd" id="2_tefeu"]
+[ext_resource type="Script" uid="uid://dua44e6q1q1yx" path="res://scripts/camera_control.gd" id="2_tefeu"]
 [ext_resource type="PackedScene" uid="uid://b3dnbvtjgt0fw" path="res://scenes/tile_board.tscn" id="3_jyhfs"]
-[ext_resource type="Script" uid="uid://cs3kgqtfo1kyb" path="res://scenes/minerals.gd" id="3_sugp2"]
-[ext_resource type="Script" uid="uid://bknoja7kjw7tr" path="res://scenes/minerals_hud.gd" id="4_jyhfs"]
-[ext_resource type="Script" uid="uid://bkopvmx0jqqr4" path="res://scenes/power_ups_hud.gd" id="5_tbgi4"]
+[ext_resource type="Script" uid="uid://cs3kgqtfo1kyb" path="res://scripts/minerals.gd" id="3_sugp2"]
+[ext_resource type="Script" uid="uid://bknoja7kjw7tr" path="res://scripts/minerals_hud.gd" id="4_jyhfs"]
+[ext_resource type="Script" uid="uid://bkopvmx0jqqr4" path="res://scripts/power_ups_hud.gd" id="5_tbgi4"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7dm0k"]
 sky_top_color = Color(0.517647, 0.788235, 1, 1)
