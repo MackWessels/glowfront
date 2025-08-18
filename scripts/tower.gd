@@ -3,18 +3,11 @@ extends Node3D
 # ---------- Visuals / feel ----------
 @export var projectile_scene: PackedScene
 @export var tracer_speed: float = 120.0
-@export var max_range: float = 40.0      
+@export var max_range: float = 40.0
 
 # ---------- Combat base ----------
-@export var base_damage: int = 1           # starting damage before upgrades
-@export var base_fire_rate: float = 1.0    # seconds between shots before upgrades
-
-# ---------- Damage upgrades ----------
-@export var dmg_per_level: int = 1
-@export var dmg_cost_base: int = 15
-@export var dmg_cost_scale: float = 1.4
-@export var dmg_level_max: int = 10
-var dmg_level: int = 0
+@export var base_damage: int = 1            # fallback only; overridden by PowerUps
+@export var base_fire_rate: float = 1.0     # seconds between shots before upgrades
 
 # ---------- Fire-rate upgrades (multiplicative; lower = faster) ----------
 @export var rate_mult_per_level: float = 0.90   # 10% faster each level
@@ -26,7 +19,7 @@ var rate_level: int = 0
 # ---------- RANGE (target acquisition) upgrades ----------
 # base_acquire_range = 0 to auto-read from DetectionArea shape on _ready().
 @export var base_acquire_range: float = 0.0
-@export var range_per_level: float = 2.0         # linear growth per level
+@export var range_per_level: float = 2.0
 @export var range_cost_base: int = 10
 @export var range_cost_scale: float = 1.30
 @export var range_level_max: int = 10
@@ -88,10 +81,13 @@ func _ready() -> void:
 
 	# Range shapes
 	_gather_range_shapes()
-	# If base_acquire_range wasn't set, read it from the existing shape
 	if base_acquire_range <= 0.0:
 		var detected := _detect_initial_range()
 		base_acquire_range = detected if detected > 0.0 else 12.0
+
+	# React to global power-up changes
+	if PowerUps.has_signal("changed"):
+		PowerUps.changed.connect(func(): _recompute_stats())
 
 	_recompute_stats()
 
@@ -150,10 +146,17 @@ func _get_balance() -> int:
 # -------------------------------------------------
 # Upgrades
 # -------------------------------------------------
+# Damage is GLOBAL via PowerUps. These helpers delegate to it so existing calls still work.
 func get_damage_upgrade_cost() -> int:
-	if dmg_level >= dmg_level_max:
-		return 0
-	return _scaled_cost(dmg_cost_base, dmg_cost_scale, dmg_level)
+	return PowerUps.upgrade_cost("turret_damage")
+
+func upgrade_damage() -> bool:
+	if PowerUps.purchase("turret_damage"):
+		# Recompute to pull the new global value
+		_recompute_stats()
+		emit_signal("upgraded", "damage", 0, 0)  # level/cost are global; placeholders
+		return true
+	return false
 
 func get_rate_upgrade_cost() -> int:
 	if rate_level >= rate_level_max:
@@ -164,17 +167,6 @@ func get_range_upgrade_cost() -> int:
 	if range_level >= range_level_max:
 		return 0
 	return _scaled_cost(range_cost_base, range_cost_scale, range_level)
-
-func upgrade_damage() -> bool:
-	if dmg_level >= dmg_level_max:
-		return false
-	var cost := get_damage_upgrade_cost()
-	if not _try_spend(cost):
-		return false
-	dmg_level += 1
-	_recompute_stats()
-	emit_signal("upgraded", "damage", dmg_level, cost)
-	return true
 
 func upgrade_fire_rate() -> bool:
 	if rate_level >= rate_level_max:
@@ -203,11 +195,14 @@ func _scaled_cost(base_cost: int, scale: float, level: int) -> int:
 	return int(round(max(1.0, c)))
 
 func _recompute_stats() -> void:
-	_current_damage = max(1, base_damage + dmg_per_level * dmg_level)
+	# Flat, global damage
+	_current_damage = PowerUps.turret_damage_value() if PowerUps else base_damage
 
+	# Fire rate from local upgrades
 	var mult := pow(max(0.01, rate_mult_per_level), rate_level)
 	_current_fire_rate = clamp(base_fire_rate * mult, _FIRE_RATE_MIN, 999.0)
 
+	# Acquisition range from local upgrades
 	var base_r := base_acquire_range if base_acquire_range > 0.0 else 12.0
 	_current_acquire_range = max(0.5, base_r + range_per_level * float(range_level))
 	_apply_range_to_area(_current_acquire_range)

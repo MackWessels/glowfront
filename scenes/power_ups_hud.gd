@@ -134,7 +134,8 @@ func _refresh_card(id: String) -> void:
 	var max_level: int = int(conf.get("max_level", 0))
 	var at_max: bool = (max_level > 0 and lvl >= max_level)
 
-	value_label.text = _next_value_text(id, lvl)
+	# *** CURRENT value, not next ***
+	value_label.text = _current_value_text(id, lvl)
 
 	var cost: int = PowerUps.upgrade_cost(id)
 	var can_buy: bool = (not at_max and cost >= 0 and Economy.balance() >= cost)
@@ -145,10 +146,7 @@ func _refresh_card(id: String) -> void:
 		cost_label.text = "$ " + str(cost)
 		btn.disabled = not can_buy
 
-	if btn.disabled:
-		btn.modulate = Color(0.9, 0.9, 0.9)
-	else:
-		btn.modulate = Color(1, 1, 1)
+	btn.modulate = Color(0.9, 0.9, 0.9) if btn.disabled else Color(1, 1, 1)
 
 # ---------- formatting ----------
 func _pretty_name(id: String) -> String:
@@ -164,13 +162,12 @@ func _pretty_name(id: String) -> String:
 		_:
 			return id.capitalize()
 
-func _next_value_text(id: String, current_level: int) -> String:
+func _current_value_text(id: String, current_level: int) -> String:
+	# Show the actual, present value in the top-right.
 	if id == "turret_damage":
-		var conf: Dictionary = PowerUps.upgrades_config.get(id, {}) as Dictionary
-		var per: float = float(conf.get("per_level_pct", 0.0)) / 100.0
-		var next_mult: float = pow(1.0 + per, float(current_level + 1))
-		return "x" + ("%.2f" % next_mult)
-	return "Lv " + str(current_level + 1)
+		return str(PowerUps.turret_damage_value())  # e.g., "5"
+	# Fallback for other upgrades (if you add them later):
+	return "Lv " + str(current_level)
 
 # ---------- utilities ----------
 func _clear_grid_children() -> void:

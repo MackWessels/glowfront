@@ -47,6 +47,7 @@ script = ExtResource("4_jyhfs")
 value_label_path = NodePath("ValueLabel")
 
 [node name="ValueLabel" type="Label" parent="MineralsHUD"]
+layout_mode = 0
 offset_left = 4.0
 offset_top = 8.0
 offset_right = 103.0
