@@ -61,10 +61,11 @@ func _pan_with_keyboard(delta: float) -> void:
 	if Input.is_key_pressed(KEY_W): v.y += 1
 	if Input.is_key_pressed(KEY_A): v.x -= 1
 	if Input.is_key_pressed(KEY_D): v.x += 1
+	
 	# Arrows
-	if Input.is_key_pressed(KEY_UP):    v.y -= 1
-	if Input.is_key_pressed(KEY_DOWN):  v.y += 1
-	if Input.is_key_pressed(KEY_LEFT):  v.x -= 1
+	if Input.is_key_pressed(KEY_DOWN): v.y -= 1
+	if Input.is_key_pressed(KEY_UP): v.y += 1
+	if Input.is_key_pressed(KEY_LEFT): v.x -= 1
 	if Input.is_key_pressed(KEY_RIGHT): v.x += 1
 
 	if v == Vector2.ZERO: return

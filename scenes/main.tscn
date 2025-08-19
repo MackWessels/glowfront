@@ -26,6 +26,7 @@ script = ExtResource("1_0wfyh")
 main_menu_path = "uid://dwdo6442wh28n"
 
 [node name="OverheadCamera" type="Camera3D" parent="."]
+process_mode = 3
 transform = Transform3D(1, 0, 0, 0, 0.34202, 0.939693, 0, -0.939693, 0.34202, 9, 12, 16)
 current = true
 script = ExtResource("2_tefeu")
@@ -72,11 +73,13 @@ layout_mode = 3
 anchors_preset = 0
 offset_right = 40.0
 offset_bottom = 40.0
+mouse_filter = 1
 
 [node name="ColorRect" type="ColorRect" parent="CanvasLayer/GameOver"]
 layout_mode = 0
 offset_right = 40.0
 offset_bottom = 40.0
+mouse_filter = 2
 
 [node name="CenterContainer" type="CenterContainer" parent="CanvasLayer/GameOver"]
 layout_mode = 0
