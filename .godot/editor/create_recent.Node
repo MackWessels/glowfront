@@ -1,9 +1,11 @@
+MarginContainer
+Panel
+CenterContainer
 Label
 HBoxContainer
 Node
 Button
 VBoxContainer
-CenterContainer
 ColorRect
 Control
 CanvasLayer
@@ -11,4 +13,3 @@ GridContainer
 TextureRect
 CollisionShape3D
 CharacterBody3D
-StaticBody3D

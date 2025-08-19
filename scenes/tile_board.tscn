@@ -19,5 +19,7 @@ enemy_spawner = NodePath("EnemySpawner")
 [node name="Goal" parent="." instance=ExtResource("4_ijtfa")]
 
 [node name="PlacementMenu" parent="." instance=ExtResource("5_jdbot")]
+visible = false
+unfocusable = false
 
 [editable path="EnemySpawner"]

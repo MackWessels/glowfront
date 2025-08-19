@@ -3,16 +3,16 @@ extends Node
 @export_file("*.tscn") var main_menu_path := "res://MainMenu.tscn"
 
 @onready var game_over: Control = $CanvasLayer/GameOver
-@onready var retry_btn: Button  = $CanvasLayer/GameOver/CenterContainer/VBoxContainer/RetryButton
-@onready var menu_btn: Button   = $CanvasLayer/GameOver/CenterContainer/VBoxContainer/MenuButton
+@onready var retry_btn: Button  = $CanvasLayer/GameOver/CenterContainer/Panel/MarginContainer/VBoxContainer/RetryButton
+@onready var menu_btn: Button   = $CanvasLayer/GameOver/CenterContainer/Panel/MarginContainer/VBoxContainer/MenuButton
 
 func _ready() -> void:
 	Health.reset()
 	Health.defeated.connect(_on_defeated)
 
-
 	game_over.visible = false
 	game_over.process_mode = Node.PROCESS_MODE_ALWAYS
+	# Ensure full-rect (safe even if a helper script also does this)
 	game_over.anchor_left = 0; game_over.anchor_top = 0
 	game_over.anchor_right = 1; game_over.anchor_bottom = 1
 	game_over.offset_left = 0; game_over.offset_top = 0
@@ -22,10 +22,9 @@ func _ready() -> void:
 	menu_btn.pressed.connect(_on_menu_pressed)
 
 func _on_defeated() -> void:
-
 	game_over.visible = true
 	game_over.modulate.a = 0.0
-	var t := game_over.create_tween()        
+	var t := game_over.create_tween()
 	t.tween_property(game_over, "modulate:a", 1.0, 0.25)
 	await t.finished
 	get_tree().paused = true
