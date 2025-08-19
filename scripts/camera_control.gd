@@ -1,4 +1,3 @@
-# OverheadCamera.gd — pan (WASD/Arrows), rotate (LMB drag), zoom (wheel)
 extends Camera3D
 
 @export var focus_node: NodePath                 # e.g., TileBoard or a Pivot

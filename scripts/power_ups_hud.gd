@@ -1,7 +1,7 @@
 extends CanvasLayer
 
 @export var columns: int = 2
-@export var card_min_size: Vector2 = Vector2(130, 50)  # half-size tiles
+@export var card_min_size: Vector2 = Vector2(130, 50) 
 @export var margin_left: int = 16
 @export var margin_bottom: int = 16
 @export var grid_h_separation: int = 6
@@ -9,7 +9,7 @@ extends CanvasLayer
 
 var _panel: Control
 var _grid: GridContainer
-var _cards: Dictionary = {}   # id -> Button
+var _cards: Dictionary = {} 
 
 func _ready() -> void:
 	# Panel that we position bottom-left in screen space
@@ -41,7 +41,7 @@ func _on_balance_changed(_bal: int) -> void:
 func _on_upgrade_purchased(_id: String, _lvl: int, _next_cost: int) -> void:
 	_refresh_all()
 
-# ---------- layout ----------
+#  layout
 func _layout_panel() -> void:
 	var count: int = PowerUps.upgrades_config.size()
 	var cols: int = max(1, columns)
@@ -66,7 +66,7 @@ func _layout_panel() -> void:
 	var y: float = vp.y - height - float(margin_bottom)
 	_panel.position = Vector2(x, y)
 
-# ---------- build & refresh ----------
+# build & refresh
 func _build_cards() -> void:
 	_cards.clear()
 	_clear_grid_children()
@@ -79,7 +79,7 @@ func _add_card_for(id: String) -> void:
 	btn.focus_mode = Control.FOCUS_NONE
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	btn.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	btn.text = ""  # we use child labels; the whole tile is clickable
+	btn.text = "" 
 
 	var root := VBoxContainer.new()
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -134,7 +134,7 @@ func _refresh_card(id: String) -> void:
 	var max_level: int = int(conf.get("max_level", 0))
 	var at_max: bool = (max_level > 0 and lvl >= max_level)
 
-	# *** CURRENT value, not next ***
+	# current value
 	value_label.text = _current_value_text(id, lvl)
 
 	var cost: int = PowerUps.upgrade_cost(id)
@@ -148,7 +148,7 @@ func _refresh_card(id: String) -> void:
 
 	btn.modulate = Color(0.9, 0.9, 0.9) if btn.disabled else Color(1, 1, 1)
 
-# ---------- formatting ----------
+# formatting
 func _pretty_name(id: String) -> String:
 	match id:
 		"turret_damage":
@@ -163,13 +163,11 @@ func _pretty_name(id: String) -> String:
 			return id.capitalize()
 
 func _current_value_text(id: String, current_level: int) -> String:
-	# Show the actual, present value in the top-right.
 	if id == "turret_damage":
-		return str(PowerUps.turret_damage_value())  # e.g., "5"
-	# Fallback for other upgrades (if you add them later):
+		return str(PowerUps.turret_damage_value())  
 	return "Lv " + str(current_level)
 
-# ---------- utilities ----------
+# utilities
 func _clear_grid_children() -> void:
 	for c in _grid.get_children():
 		(c as Node).queue_free()

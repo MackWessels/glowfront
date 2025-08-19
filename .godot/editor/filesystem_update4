@@ -9,11 +9,8 @@ res://scenes/goal.tscn
 res://scenes/projectile.tscn
 res://scenes/elite_enemy.tscn
 res://scenes/economy.tscn
-res://scenes/main_menu.gd
 res://scenes/main_menu.tscn
-res://scripts/main_menu.gd
-res://scripts/goal.gd
-res://health.gd
-res://scripts/enemy.gd
-res://scripts/health.gd
-res://scripts/main.gd
+res://scripts/shards_hud.gd
+res://scripts/power_ups_hud.gd
+res://scripts/power_ups.gd
+res://scripts/camera_control.gd

@@ -1,10 +1,10 @@
 extends Node
 
-# ---- signals ----
+# signals 
 signal changed()
 signal upgrade_purchased(id: String, new_level: int, next_cost: int)
 
-# ---- economy helpers ----
+# economy helpers 
 func balance() -> int:
 	if Economy.has_method("balance"):
 		return int(Economy.call("balance"))
@@ -28,10 +28,9 @@ func _try_spend(cost: int, reason: String = "") -> bool:
 		return true
 	return balance() >= cost
 
-# ---- repeatable upgrades (CONFIG) ----
+#  repeatable upgrades
 @export var upgrades_config: Dictionary = {
 	"turret_damage": {
-		# Level -> cost: 0.. -> 10, 12, 14, 17, 20, 24, 29, 35, then +7, +8, +9, ...
 		"cost_sequence": [10, 12, 14, 17, 20, 24, 29, 35],
 		"max_level": 0
 	}
@@ -53,7 +52,7 @@ func _round_to(value: float, step: int) -> int:
 		return int(round(value))
 	return int(round(value / float(step))) * step
 
-# ---- cost logic ----
+#  cost logic
 func upgrade_cost(id: String) -> int:
 	var conf: Dictionary = upgrades_config.get(id, {}) as Dictionary
 	if conf.is_empty():
@@ -65,14 +64,13 @@ func upgrade_cost(id: String) -> int:
 		var seq: Array = conf.get("cost_sequence", []) as Array
 		return _sequence_cost(seq, lvl)
 
-	# Fallback for other upgrades you add later
 	var base_cost: int = int(conf.get("base_cost", 0))
 	var factor: float = float(conf.get("cost_factor", 1.0))
 	var step: int = int(conf.get("cost_round_to", 1))
 	var raw: float = float(base_cost) * pow(factor, float(lvl))
 	return _round_to(raw, step)
 
-# Within sequence: exact value. Beyond: keep increasing the diff by +1 each level.
+
 func _sequence_cost(seq: Array, lvl: int) -> int:
 	var n: int = seq.size()
 	if n == 0:
@@ -116,7 +114,7 @@ func purchase(id: String) -> bool:
 	upgrade_purchased.emit(id, lvl + 1, next_cost)
 	return true
 
-# ---- DAMAGE: pattern value helpers ----
+#  DAMAGE: pattern value helpers
 # damage(n) = 3*n + max(0, floor((n - 4) * 2 / 3))
 # Map n = level + 1 so level 0 => n=1 => 3 dmg.
 func _damage_formula(n: int) -> int:

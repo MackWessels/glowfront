@@ -1,6 +1,7 @@
-[gd_scene load_steps=2 format=3 uid="uid://dwdo6442wh28n"]
+[gd_scene load_steps=3 format=3 uid="uid://dwdo6442wh28n"]
 
 [ext_resource type="Script" uid="uid://cljsnyj3dd8eb" path="res://scripts/main_menu.gd" id="1_l6cm7"]
+[ext_resource type="Script" uid="uid://7b75ey2guopi" path="res://scenes/shards_label.gd" id="2_ekxnf"]
 
 [node name="MainMenu" type="Control"]
 layout_mode = 3
@@ -34,3 +35,7 @@ text = "Start"
 [node name="QuitButton" type="Button" parent="CenterContainer/VBoxContainer"]
 layout_mode = 2
 text = "Quit"
+
+[node name="ShardsLabel" type="Label" parent="CenterContainer/VBoxContainer"]
+layout_mode = 2
+script = ExtResource("2_ekxnf")

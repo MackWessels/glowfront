@@ -1,6 +1,7 @@
+Label
+HBoxContainer
 Node
 Button
-Label
 VBoxContainer
 CenterContainer
 ColorRect
@@ -8,7 +9,6 @@ Control
 CanvasLayer
 GridContainer
 TextureRect
-HBoxContainer
 CollisionShape3D
 CharacterBody3D
 StaticBody3D

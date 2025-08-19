@@ -14,7 +14,7 @@ extends CharacterBody3D
 @export var is_elite: bool = false
 
 # ---------------- health / combat ----------------
-@export var max_health: int = 2          
+@export var max_health: int = 2
 @export var armor_pct: float = 0.0         # percent-based reduction
 var health: int = 1
 signal died
@@ -25,8 +25,8 @@ signal health_changed(current: int, maxv: int)
 
 # ---------------- turret avoidance ----------------
 @export var avoid_turrets: bool = true
-@export var avoid_radius_tiles: float = 1.1     
-@export var avoid_strength_tiles: float = 0.8  
+@export var avoid_radius_tiles: float = 1.1
+@export var avoid_strength_tiles: float = 0.8
 
 # ---------------- entry step targeting ----------------
 const ENTRY_RADIUS_DEFAULT: float = 0.20
@@ -90,14 +90,12 @@ func _ready() -> void:
 	add_to_group("enemies", true)
 	if is_elite:
 		add_to_group("elite_enemies", true)
-	
-
 
 # ---------- idle API (replaces pause) ----------
 func set_idle(on: bool, seconds: float = -1.0) -> void:
 	_idle = on
 	_idle_timer = seconds
-	_paused = on   
+	_paused = on
 
 func idle_for(seconds: float) -> void:
 	set_idle(true, seconds)
@@ -150,11 +148,13 @@ func _die_with_reward(award: bool) -> void:
 		return
 	_dead = true
 
-	if award and bounty > 0:
-		var src: String = "kill"
-		if is_elite:
-			src = "elite_kill"
-		_econ_add(bounty, src)
+	if award:
+		# Minerals bounty (existing)
+		if bounty > 0:
+			var src: String = ("elite_kill" if is_elite else "kill")
+			_econ_add(bounty, src)
+		# Shards drop (meta-currency): elites always drop, normals roll global chance
+		Shards.award_for_enemy(is_elite)
 
 	emit_signal("died")
 	queue_free()
@@ -232,7 +232,7 @@ func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
-	# Idle  stand still 
+	# Idle  stand still
 	if _idle or _paused or _board == null:
 		if _idle and _idle_timer >= 0.0:
 			_idle_timer -= delta
@@ -254,7 +254,7 @@ func _physics_process(delta: float) -> void:
 		_y_plane = global_position.y
 		_y_plane_set = true
 
-	# Entry step 
+	# Entry step
 	if _entry_active:
 		_entry_elapsed += delta
 
@@ -294,8 +294,6 @@ func _physics_process(delta: float) -> void:
 
 			if _entry_active:
 				return
-
-
 
 	# Flow-field steering
 	var dir_vec: Vector3 = _get_flow_dir()
@@ -453,7 +451,7 @@ func _turret_avoidance_velocity() -> Vector3:
 	var away: Vector3 = global_position - nearest_pos
 	away.y = 0.0
 	if d <= EPS:
-		away = Vector3(1, 0, 0)  
+		away = Vector3(1, 0, 0)
 	else:
 		away /= d
 
