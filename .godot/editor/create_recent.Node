@@ -1,15 +1,14 @@
-MarginContainer
+VBoxContainer
 Panel
+MarginContainer
 CenterContainer
 Label
 HBoxContainer
 Node
 Button
-VBoxContainer
 ColorRect
 Control
 CanvasLayer
 GridContainer
 TextureRect
 CollisionShape3D
-CharacterBody3D

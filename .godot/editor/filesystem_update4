@@ -10,9 +10,6 @@ res://scenes/projectile.tscn
 res://scenes/elite_enemy.tscn
 res://scenes/economy.tscn
 res://scenes/main_menu.tscn
-res://scripts/shards_hud.gd
-res://scripts/power_ups_hud.gd
-res://scripts/power_ups.gd
-res://scripts/camera_control.gd
-res://scripts/GameOverUI.gd
 res://scripts/main.gd
+res://scripts/GameOverUI.gd
+res://scripts/main_menu.gd

@@ -1,8 +1,8 @@
 extends Control
 
 @export_file("*.tscn") var main_scene_path: String = "res://Main.tscn"
-@onready var play_btn: Button   = $CenterContainer/VBoxContainer/PlayButton
-@onready var quit_btn: Button   = $CenterContainer/VBoxContainer/QuitButton
+@onready var play_btn: Button   = $CenterContainer/Panel/MarginContainer/VBoxContainer/PlayButton
+@onready var quit_btn: Button   = $CenterContainer/Panel/MarginContainer/VBoxContainer/QuitButton
 @onready var fade: ColorRect    = $Fade
 
 func _ready() -> void:
