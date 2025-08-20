@@ -11,6 +11,7 @@ func _ready() -> void:
 	game_over.process_mode = Node.PROCESS_MODE_ALWAYS
 	retry_btn.pressed.connect(_on_retry_pressed)
 	menu_btn.pressed.connect(_on_menu_pressed)
+	PowerUps.begin_run()
 
 func _on_defeated() -> void:
 	game_over.visible = true

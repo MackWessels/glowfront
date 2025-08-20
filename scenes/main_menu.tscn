@@ -1,7 +1,8 @@
-[gd_scene load_steps=4 format=3 uid="uid://dwdo6442wh28n"]
+[gd_scene load_steps=5 format=3 uid="uid://dwdo6442wh28n"]
 
 [ext_resource type="Script" uid="uid://cljsnyj3dd8eb" path="res://scripts/main_menu.gd" id="1_l6cm7"]
 [ext_resource type="Script" uid="uid://7b75ey2guopi" path="res://scenes/shards_label.gd" id="2_ekxnf"]
+[ext_resource type="Script" uid="uid://7prtr0tyxjw2" path="res://scenes/shard_upgrades_panel.gd" id="3_bqqt6"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ekxnf"]
 corner_radius_top_left = 14
@@ -17,6 +18,7 @@ offset_right = 40.0
 offset_bottom = 40.0
 script = ExtResource("1_l6cm7")
 main_scene_path = "uid://b8msl4kqjlhan"
+upgrades_panel_path = NodePath("ShardUpgradesPanel")
 
 [node name="Fade" type="ColorRect" parent="."]
 visible = false
@@ -57,6 +59,7 @@ theme_override_constants/separation = 12
 alignment = 1
 
 [node name="Label2" type="Label" parent="CenterContainer/Panel/MarginContainer/VBoxContainer"]
+visible = false
 layout_mode = 2
 
 [node name="PlayButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBoxContainer"]
@@ -67,9 +70,46 @@ text = "Start"
 layout_mode = 2
 text = "Quit"
 
+[node name="UpgradesButton" type="Button" parent="CenterContainer/Panel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "Upgrades"
+
 [node name="ShardsLabel" type="Label" parent="."]
 layout_mode = 2
 offset_top = 97.0
 offset_right = 46.0
 offset_bottom = 120.0
 script = ExtResource("2_ekxnf")
+
+[node name="ShardUpgradesPanel" type="Panel" parent="."]
+unique_name_in_owner = true
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+script = ExtResource("3_bqqt6")
+
+[node name="MarginContainer" type="MarginContainer" parent="ShardUpgradesPanel"]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="ShardUpgradesPanel/MarginContainer"]
+layout_mode = 2
+
+[node name="BalanceLabel" type="Label" parent="ShardUpgradesPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="DamageButton" type="Button" parent="ShardUpgradesPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="CloseButton" type="Button" parent="ShardUpgradesPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+text = "close"
+
+[node name="ResetShardsButton" type="Button" parent="ShardUpgradesPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[node name="ResetUpgradesButton" type="Button" parent="ShardUpgradesPanel/MarginContainer/VBoxContainer"]
+layout_mode = 2
+
+[connection signal="pressed" from="CenterContainer/Panel/MarginContainer/VBoxContainer/UpgradesButton" to="." method="_on_upgrades_pressed"]

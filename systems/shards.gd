@@ -67,3 +67,9 @@ func _save() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
 		_save()
+
+# Reset shards to a value (default 0) and save
+func reset_for_testing(to: int = 0) -> void:
+	_balance = max(0, to)
+	emit_signal("changed", _balance)
+	_save()

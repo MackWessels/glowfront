@@ -1,11 +1,11 @@
-VBoxContainer
-Panel
-MarginContainer
-CenterContainer
+Button
 Label
+VBoxContainer
+MarginContainer
+Panel
+CenterContainer
 HBoxContainer
 Node
-Button
 ColorRect
 Control
 CanvasLayer

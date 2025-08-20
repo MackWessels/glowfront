@@ -2,7 +2,7 @@ extends Node3D
 
 @export var spawner_span: int = 3
 @export var board_size_x: int = 10
-@export var board_size_z: int = 10
+@export var board_size_z: int = 11
 @export var tile_scene: PackedScene
 @export var tile_size: float = 2.0
 @export var goal_node: Node3D
