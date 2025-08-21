@@ -75,6 +75,7 @@ layout_mode = 2
 text = "Upgrades"
 
 [node name="ShardsLabel" type="Label" parent="."]
+visible = false
 layout_mode = 2
 offset_top = 97.0
 offset_right = 46.0
@@ -111,5 +112,3 @@ layout_mode = 2
 
 [node name="ResetUpgradesButton" type="Button" parent="ShardUpgradesPanel/MarginContainer/VBoxContainer"]
 layout_mode = 2
-
-[connection signal="pressed" from="CenterContainer/Panel/MarginContainer/VBoxContainer/UpgradesButton" to="." method="_on_upgrades_pressed"]

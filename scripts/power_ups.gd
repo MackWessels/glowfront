@@ -145,7 +145,7 @@ func get_next_meta_offer(id: String) -> Dictionary:
 	if not _SHARDS_COSTS.has(id):
 		return {"available": false}
 	var m_lvl := meta_level(id)
-	var next_value := _value_for(id, m_lvl + 1)  # what buying with shards will give you
+	var next_value := _value_for(id, m_lvl + 1)  # buying with shards gives next absolute step
 	var costs: Array = _SHARDS_COSTS[id]
 	var cost := (int(costs[m_lvl]) if m_lvl < costs.size() else int(round(float(costs.back()) * 1.33)))
 	return {"available": true, "next_value": next_value, "cost_shards": cost}
@@ -153,7 +153,6 @@ func get_next_meta_offer(id: String) -> Dictionary:
 func purchase_meta(id: String) -> bool:
 	if not _SHARDS_COSTS.has(id):
 		return false
-	# read current meta step and cost
 	var offer := get_next_meta_offer(id)
 	if not offer.available:
 		return false
@@ -171,16 +170,18 @@ func purchase_meta(id: String) -> bool:
 
 # ---------- run UI helper (minerals) ----------
 func get_next_run_offer(id: String) -> Dictionary:
+	# Show the value you'll have AFTER the next run purchase.
+	# Baseline step is 1 (3 dmg), so with total_level t, next is step (t + 2).
 	var t_lvl := total_level(id)
-	var next_value := _value_for(id, t_lvl + 1)   # value after the next *run* purchase
-	var cost := upgrade_cost(id)                  # cost depends only on run level
+	var next_value := _value_for(id, t_lvl + 2)
+	var cost := upgrade_cost(id)                  # cost depends only on *run* level
 	if cost < 0:
 		return {"available": false}
 	return {"available": true, "next_value": next_value, "cost_minerals": cost}
 
 # ---------- value paths ----------
-# DAMAGE pattern (you supplied): 3, 6, 9, 12, 15, 19, 23, 26, 30, ...
-# We'll treat "step n" as the value after n total purchases (meta+run).
+# DAMAGE pattern: 3, 6, 9, 12, 15, 19, 23, 26, 30, ...
+# "step n" is 1-indexed absolute value (1 -> 3 dmg).
 func _value_for(id: String, step: int) -> int:
 	if step <= 0:
 		return 0
@@ -195,16 +196,16 @@ func _damage_formula(n: int) -> int:
 	return 3 * n + max(0, bonus)
 
 # ---------- public helpers for damage ----------
-# Current bonus applied in gameplay (0 if you haven’t bought any, meta or run)
-func turret_damage_bonus() -> int:
-	return _value_for("turret_damage", total_level("turret_damage"))
-
-# For legacy UI: "current" and "next" values now include meta+run levels.
+# Baseline is step 1 (3 dmg) even with zero purchases.
 func turret_damage_value() -> int:
-	return turret_damage_bonus()
+	return _value_for("turret_damage", total_level("turret_damage") + 1)
 
 func next_turret_damage_value() -> int:
-	return _value_for("turret_damage", total_level("turret_damage") + 1)
+	return _value_for("turret_damage", total_level("turret_damage") + 2)
+
+# Kept for compatibility; treat as the flat global damage value.
+func turret_damage_bonus() -> int:
+	return turret_damage_value()
 
 func turret_damage_multiplier() -> float:
 	return 1.0
