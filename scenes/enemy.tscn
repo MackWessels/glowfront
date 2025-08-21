@@ -13,7 +13,6 @@ transform = Transform3D(0.35, 0, 0, 0, 0.35, 0, 0, 0, 0.35, 0, 0, 0)
 collision_layer = 4
 collision_mask = 38
 script = ExtResource("1_7p1mj")
-max_health = 1
 
 [node name="DomeCollider" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.168067, 0)

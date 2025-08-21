@@ -13,6 +13,20 @@ extends Node3D
 # Economy
 @export var turret_cost: int = 10
 
+# --- Bounds config (constants; tweak here if needed) --------------------------
+const BOUNDS_THICKNESS: float = 0.35
+const BOUNDS_HEIGHT: float = 4.0
+const SHOW_BOUNDS_DEBUG := true
+const BOUNDS_COLLISION_LAYER: int = 1 << 1     # layer 2; ensure enemies' MASK includes this
+const BOUNDS_COLLISION_MASK: int = 0           # static walls don't need a mask
+
+const CARVE_OPENINGS_FOR_PORTALS := true
+const GOAL_OPENING_TILES: int = 1
+const OPENING_EXTRA_MARGIN_TILES: float = 0.25
+
+const PORTAL_PEN_ENABLED := true
+const PORTAL_PEN_DEPTH_TILES: float = 1.0
+
 signal global_path_changed
 
 var tiles: Dictionary = {}
@@ -42,8 +56,14 @@ func _ready() -> void:
 	if origin_tile:
 		_grid_origin = origin_tile.global_position
 	_step = tile_size
+
+	# Place portals
 	position_portal(goal_node, "right")
 	position_portal(spawner_node, "left")
+
+	# Build perimeter collisions (just outside the board) with gaps at portals
+	_create_bounds()
+
 	_recompute_flow()
 
 	if placement_menu and not placement_menu.is_connected("place_selected", Callable(self, "_on_place_selected")):
@@ -55,7 +75,6 @@ func _physics_process(_delta: float) -> void:
 		return
 
 	var changed: bool = false
-	# finalize any blue tiles whose cell is now free of enemies
 	for pos: Vector2i in closing.keys():
 		if _any_enemy_on(pos):
 			continue
@@ -63,7 +82,6 @@ func _physics_process(_delta: float) -> void:
 			var act: String = pending_action[pos]
 			var cost_now: int = _power_cost_for(act)
 
-			# re-check funds at finalization time
 			if cost_now > 0 and not _econ_can_afford(cost_now):
 				tiles[pos].set_pending_blue(false)
 				pending_action.erase(pos)
@@ -144,18 +162,260 @@ func _placement_succeeded(tile: Node, action: String) -> bool:
 
 # --------- Board generation ---------
 func generate_board() -> void:
+	if tile_scene == null:
+		push_error("TileBoard: 'tile_scene' is not assigned in the Inspector.")
+		return
+	tiles.clear()
 	for x in board_size_x:
 		for z in board_size_z:
-			var tile: Node = tile_scene.instantiate()
+			var tile := tile_scene.instantiate() as Node3D
 			add_child(tile)
 
-			var pos: Vector2i = Vector2i(x, z)
-			(tile as Node3D).position = Vector3(x * tile_size, 0.0, z * tile_size)
+			var pos := Vector2i(x, z)
+			tile.position = Vector3(x * tile_size, 0.0, z * tile_size)
 			tile.set("grid_position", pos)
 			tile.set("tile_board", self)
 			tile.set("placement_menu", placement_menu)
 
 			tiles[pos] = tile
+
+# --- Perimeter walls (colliders + optional debug mesh), with gaps for portals -
+func _create_bounds() -> void:
+	var old := get_node_or_null("BoardBounds")
+	if old:
+		old.queue_free()
+
+	var container := Node3D.new()
+	container.name = "BoardBounds"
+	add_child(container)
+
+	# world-space board edges (tile centers extend half a step to each side)
+	var left   := _grid_origin.x - _step * 0.5
+	var right  := _grid_origin.x + (board_size_x - 0.5) * _step
+	var top    := _grid_origin.z - _step * 0.5
+	var bottom := _grid_origin.z + (board_size_z - 0.5) * _step
+
+	var width  := right - left
+	var depth  := bottom - top
+
+	var y_size := BOUNDS_HEIGHT
+	var y_pos  := y_size * 0.5
+
+	# openings map by side
+	var openings := {
+		"left": [], "right": [], "top": [], "bottom": []
+	}
+
+	if CARVE_OPENINGS_FOR_PORTALS:
+		var bounds := _grid_bounds()
+
+		# Spawner gap (use spawner_span)
+		if is_instance_valid(spawner_node):
+			var sp_cell := world_to_cell(spawner_node.global_position)
+			var sp_side := _side_of_cell(sp_cell, bounds)
+			var sp_half := _step * (float(max(1, spawner_span)) * 0.5 + OPENING_EXTRA_MARGIN_TILES)
+			if sp_side == "left" or sp_side == "right":
+				var cz := cell_to_world(sp_cell).z
+				openings[sp_side].append({"center": cz, "half": sp_half})
+			else:
+				var cx := cell_to_world(sp_cell).x
+				openings[sp_side].append({"center": cx, "half": sp_half})
+
+		# Goal gap (usually 1 tile)
+		if is_instance_valid(goal_node):
+			var g_cell := world_to_cell(goal_node.global_position)
+			var g_side := _side_of_cell(g_cell, bounds)
+			var g_half := _step * (float(max(1, GOAL_OPENING_TILES)) * 0.5 + OPENING_EXTRA_MARGIN_TILES)
+			if g_side == "left" or g_side == "right":
+				var cz2 := cell_to_world(g_cell).z
+				openings[g_side].append({"center": cz2, "half": g_half})
+			else:
+				var cx2 := cell_to_world(g_cell).x
+				openings[g_side].append({"center": cx2, "half": g_half})
+
+	# NORTH (top) wall — runs along X (thin in Z)
+	_build_wall_x(
+		container,
+		top - BOUNDS_THICKNESS * 0.5,  # z_pos
+		left,                           # left
+		right,                          # right
+		y_pos, y_size,
+		BOUNDS_THICKNESS,
+		openings["top"]
+	)
+
+	# SOUTH (bottom) wall
+	_build_wall_x(
+		container,
+		bottom + BOUNDS_THICKNESS * 0.5,
+		left, right,
+		y_pos, y_size,
+		BOUNDS_THICKNESS,
+		openings["bottom"]
+	)
+
+	# WEST (left) wall — runs along Z (thin in X)
+	_build_wall_z(
+		container,
+		left - BOUNDS_THICKNESS * 0.5,  # x_pos
+		top, bottom,
+		y_pos, y_size,
+		BOUNDS_THICKNESS,
+		openings["left"]
+	)
+
+	# EAST (right) wall
+	_build_wall_z(
+		container,
+		right + BOUNDS_THICKNESS * 0.5,
+		top, bottom,
+		y_pos, y_size,
+		BOUNDS_THICKNESS,
+		openings["right"]
+	)
+
+	# Pens (short tunnels) outside openings to catch knockback
+	if PORTAL_PEN_ENABLED:
+		_add_portal_pens(
+			container,
+			left, right, top, bottom,
+			y_pos, y_size,
+			BOUNDS_THICKNESS,
+			openings
+		)
+
+func _side_of_cell(cell: Vector2i, b: Rect2i) -> String:
+	var left_i := b.position.x
+	var top_i := b.position.y
+	var right_i := b.position.x + b.size.x - 1
+	var bottom_i := b.position.y + b.size.y - 1
+	if cell.x <= left_i: return "left"
+	elif cell.x >= right_i: return "right"
+	elif cell.y <= top_i: return "top"
+	else: return "bottom"
+
+func _build_wall_x(parent: Node, z_pos: float, left: float, right: float, y_pos: float, y_size: float, thickness: float, openings: Array) -> void:
+	var start := left - thickness
+	var end := right + thickness
+	var segments := _segments_along(start, end, openings)
+	for seg in segments:
+		var cx: float = seg["center"]
+		var L: float = seg["len"]
+		if L <= 0.001: continue
+		_make_wall(parent, Vector3(cx, y_pos, z_pos), Vector3(L, y_size, thickness))
+
+func _build_wall_z(parent: Node, x_pos: float, top: float, bottom: float, y_pos: float, y_size: float, thickness: float, openings: Array) -> void:
+	var start := top - thickness
+	var end := bottom + thickness
+	var segments := _segments_along(start, end, openings)
+	for seg in segments:
+		var cz: float = seg["center"]
+		var L: float = seg["len"]
+		if L <= 0.001: continue
+		_make_wall(parent, Vector3(x_pos, y_pos, cz), Vector3(thickness, y_size, L))
+
+func _segments_along(start: float, end: float, openings: Array) -> Array:
+	var segs: Array = []
+	var cur := start
+
+	var ops := openings.duplicate()
+	ops.sort_custom(func(a, b): return a["center"] < b["center"])
+
+	for op in ops:
+		var half: float = op["half"]
+		var c: float = op["center"]
+		var o_start := c - half
+		var o_end := c + half
+		var s := o_start - cur
+		if s > 0.001:
+			segs.append({"center": (cur + o_start) * 0.5, "len": s})
+		cur = max(cur, o_end)
+
+	var tail := end - cur
+	if tail > 0.001:
+		segs.append({"center": (cur + end) * 0.5, "len": tail})
+	return segs
+
+# Build U-shaped pens around each opening so units can't be knocked OOB behind portals.
+func _add_portal_pens(
+	parent: Node,
+	left: float, right: float, top: float, bottom: float,
+	y_pos: float, y_size: float,
+	thickness: float,
+	openings: Dictionary
+) -> void:
+	var depth: float = _step * max(0.0, PORTAL_PEN_DEPTH_TILES)
+	if depth <= 0.0:
+		return
+
+	# LEFT side pens (opening along Z, tunnel extends to -X)
+	for op in openings.get("left", []):
+		var c: float = float(op["center"])
+		var half: float = float(op["half"])
+		var x_center: float = left - thickness * 0.5 - depth * 0.5
+
+		_make_wall(parent, Vector3(x_center, y_pos, (c - half) - thickness * 0.5), Vector3(depth, y_size, thickness))
+		_make_wall(parent, Vector3(x_center, y_pos, (c + half) + thickness * 0.5), Vector3(depth, y_size, thickness))
+		_make_wall(parent, Vector3(left - thickness * 0.5 - depth, y_pos, c), Vector3(thickness, y_size, (half * 2.0) + thickness * 2.0))
+
+	# RIGHT side pens (tunnel extends to +X)
+	for op in openings.get("right", []):
+		var c2: float = float(op["center"])
+		var half2: float = float(op["half"])
+		var x_center2: float = right + thickness * 0.5 + depth * 0.5
+
+		_make_wall(parent, Vector3(x_center2, y_pos, (c2 - half2) - thickness * 0.5), Vector3(depth, y_size, thickness))
+		_make_wall(parent, Vector3(x_center2, y_pos, (c2 + half2) + thickness * 0.5), Vector3(depth, y_size, thickness))
+		_make_wall(parent, Vector3(right + thickness * 0.5 + depth, y_pos, c2), Vector3(thickness, y_size, (half2 * 2.0) + thickness * 2.0))
+
+	# TOP side pens (opening along X, tunnel extends to -Z)
+	for op in openings.get("top", []):
+		var c3: float = float(op["center"])
+		var half3: float = float(op["half"])
+		var z_center: float = top - thickness * 0.5 - depth * 0.5
+
+		_make_wall(parent, Vector3((c3 - half3) - thickness * 0.5, y_pos, z_center), Vector3(thickness, y_size, depth))
+		_make_wall(parent, Vector3((c3 + half3) + thickness * 0.5, y_pos, z_center), Vector3(thickness, y_size, depth))
+		_make_wall(parent, Vector3(c3, y_pos, top - thickness * 0.5 - depth), Vector3((half3 * 2.0) + thickness * 2.0, y_size, thickness))
+
+	# BOTTOM side pens (tunnel extends to +Z)
+	for op in openings.get("bottom", []):
+		var c4: float = float(op["center"])
+		var half4: float = float(op["half"])
+		var z_center2: float = bottom + thickness * 0.5 + depth * 0.5
+
+		_make_wall(parent, Vector3((c4 - half4) - thickness * 0.5, y_pos, z_center2), Vector3(thickness, y_size, depth))
+		_make_wall(parent, Vector3((c4 + half4) + thickness * 0.5, y_pos, z_center2), Vector3(thickness, y_size, depth))
+		_make_wall(parent, Vector3(c4, y_pos, bottom + thickness * 0.5 + depth), Vector3((half4 * 2.0) + thickness * 2.0, y_size, thickness))
+
+
+func _make_wall(parent: Node, position: Vector3, size: Vector3) -> void:
+	var body := StaticBody3D.new()
+	body.name = "BoundWall"
+	body.global_position = position
+	body.collision_layer = BOUNDS_COLLISION_LAYER
+	body.collision_mask  = BOUNDS_COLLISION_MASK
+	parent.add_child(body)
+
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	shape.shape = box
+	body.add_child(shape)
+
+	if SHOW_BOUNDS_DEBUG:
+		var mesh_inst := MeshInstance3D.new()
+		var cube := BoxMesh.new()
+		cube.size = size
+		mesh_inst.mesh = cube
+
+		var mat := StandardMaterial3D.new()
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.albedo_color = Color(1.0, 0.2, 0.2, 0.25) # translucent red
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+		mesh_inst.material_override = mat
+
+		body.add_child(mesh_inst)
 
 func position_portal(portal: Node3D, side: String) -> void:
 	var mid_x: int = board_size_x >> 1
@@ -294,7 +554,6 @@ func _on_place_selected(action: String) -> void:
 
 	# Blocking actions (turret/wall)
 	if _any_enemy_on(pos):
-		# Mark blue + defer finalization to _physics_process
 		closing[pos] = true
 		pending_action[pos] = action
 		tiles[pos].set_pending_blue(true)
@@ -302,7 +561,6 @@ func _on_place_selected(action: String) -> void:
 		var path_ok: bool = _recompute_flow()
 		emit_signal("global_path_changed")
 
-		# If the block disconnects the path, run the edge handler (no shooting)
 		if not path_ok:
 			await _wait_enemy_clear_then_break(pos)
 		active_tile = null
@@ -380,18 +638,14 @@ func _idle_enemies_outside(reach: Dictionary, idle_on: bool, skip_cells: Array =
 	return affected
 
 func _wait_enemy_clear_then_break(pos: Vector2i) -> void:
-	# Idle spawns + only enemies that cannot reach the goal right now
 	enemy_spawner.pause_spawning(true)
 	var goal_reach: Dictionary = _cells_reachable_from(_goal_cell())
 
-	# don't idle enemies on the pending tile 'pos'
 	var idled: Array = _idle_enemies_outside(goal_reach, true, [pos])
 
-	# Let the enemy currently on the tile pass
 	while _any_enemy_on(pos):
 		await get_tree().process_frame
 
-	# Clear blue and break the tile (no shooting)
 	var tile: Node = tiles.get(pos, null)
 	if tile:
 		tile.set_pending_blue(false)
@@ -401,7 +655,6 @@ func _wait_enemy_clear_then_break(pos: Vector2i) -> void:
 	_recompute_flow()
 	emit_signal("global_path_changed")
 
-	# Resume only those we idled
 	for e in idled:
 		if is_instance_valid(e):
 			if e.has_method("set_idle"):
@@ -418,7 +671,6 @@ func _soft_block_sequence(tile: Node, action: String, already_placed: bool) -> v
 	var goal_reach: Dictionary = _cells_reachable_from(_goal_cell())
 	var pos: Vector2i = world_to_cell(tile.global_position)
 
-	# don't idle enemies standing on 'pos'
 	var idled: Array = _idle_enemies_outside(goal_reach, true, [pos])
 
 	var wait_t: float = 1.0

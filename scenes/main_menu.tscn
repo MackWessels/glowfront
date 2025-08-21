@@ -87,12 +87,13 @@ unique_name_in_owner = true
 layout_mode = 0
 offset_right = 40.0
 offset_bottom = 40.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_ekxnf")
 script = ExtResource("3_bqqt6")
 
 [node name="MarginContainer" type="MarginContainer" parent="ShardUpgradesPanel"]
 layout_mode = 0
-offset_right = 40.0
-offset_bottom = 40.0
+offset_right = 48.0
+offset_bottom = 94.0
 
 [node name="VBoxContainer" type="VBoxContainer" parent="ShardUpgradesPanel/MarginContainer"]
 layout_mode = 2
