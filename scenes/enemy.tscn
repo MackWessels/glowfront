@@ -3,7 +3,8 @@
 [ext_resource type="Script" uid="uid://cm3n6i18uv218" path="res://scripts/enemy.gd" id="1_7p1mj"]
 [ext_resource type="PackedScene" uid="uid://dbk0o7kp4ikj3" path="res://models/UFO.glb" id="2_md0e3"]
 
-[sub_resource type="SphereShape3D" id="SphereShape3D_4ra3w"]
+[sub_resource type="SphereShape3D" id="SphereShape3D_md0e3"]
+radius = 0.4
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_md0e3"]
 albedo_color = Color(0.137255, 1, 0.454902, 1)
@@ -16,7 +17,7 @@ script = ExtResource("1_7p1mj")
 
 [node name="DomeCollider" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.168067, 0)
-shape = SubResource("SphereShape3D_4ra3w")
+shape = SubResource("SphereShape3D_md0e3")
 
 [node name="UFO" parent="." instance=ExtResource("2_md0e3")]
 

@@ -4,7 +4,7 @@
 [ext_resource type="PackedScene" uid="uid://kjyp3nbsl47k" path="res://scenes/projectile.tscn" id="2_ay4al"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ofvlm"]
-albedo_color = Color(1, 1, 0.160784, 1)
+albedo_color = Color(0.176645, 0.118852, 0.0336739, 1)
 
 [sub_resource type="ArrayMesh" id="ArrayMesh_bdudl"]
 _surfaces = [{
@@ -112,7 +112,7 @@ shadow_mesh = SubResource("ArrayMesh_dd7d4")
 radius = 5.0
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ay4al"]
-size = Vector3(1.13016, 1.29345, 1.26819)
+size = Vector3(2, 1, 2)
 
 [node name="Tower" type="Node3D" groups=["turrets"]]
 script = ExtResource("1_2x682")
@@ -157,5 +157,4 @@ collision_layer = 32
 collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0063324, 0.253899, 0.0244751)
 shape = SubResource("BoxShape3D_ay4al")
