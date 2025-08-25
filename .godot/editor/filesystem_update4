@@ -1,3 +1,5 @@
+res://scenes/goal.tscn
+res://scripts/enemy.gd
 res://scenes/main.tscn
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
@@ -8,5 +10,3 @@ res://scenes/economy.tscn
 res://scenes/main_menu.tscn
 res://scenes/wall.tscn
 res://scenes/tower.tscn
-res://scenes/goal.tscn
-res://scripts/enemy.gd

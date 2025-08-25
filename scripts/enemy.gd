@@ -1,53 +1,41 @@
 extends CharacterBody3D
 class_name Enemy
 
-# ===================== Movement (stable, zero-jitter) =====================
-@export var speed: float = 3.0
+# ========= Conveyor movement =========
+@export var speed: float = .5
+
+@export var accel: float = 22.0
 @export var turn_speed_deg: float = 540.0
+
+# Lane variety (cosmetic lateral bias)
+@export var lane_spread_tiles: float = 0.35
+@export_range(0.0, 1.0, 0.01) var lane_bias_strength: float = 0.6
+@export var num_lanes: int = 0                 # 0=continuous, >=2 quantizes
+@export var lane_jitter_tiles: float = 0.06
+
+# Refs
 @export var tile_board_path: NodePath
 @export var goal_node_path: NodePath
 
-# How close to the next edge (in tiles) we allow movement before stopping if it's blocked
-@export var stop_margin_tiles: float = 0.25
-
-# ===================== Signals =====================
+# ===== Signals =====
 signal died
 signal cell_changed(old_cell: Vector2i, new_cell: Vector2i)
 
-# ===================== Internal refs =====================
+# ===== Internals =====
 var _board: Node = null
 var _goal: Node3D = null
-
-# ===================== Y lock =====================
-var _y_lock_enabled: bool = true
-var _y_plane: float = 0.0
-func lock_y_to(y: float) -> void:
-	_y_plane = y
-	_y_lock_enabled = true
-
-# ===================== Segment following (center -> center) =====================
-var _cur_cell: Vector2i = Vector2i(-9999, -9999)
-var _next_cell: Vector2i = Vector2i(-9999, -9999)
-
-var _a: Vector3 = Vector3.ZERO     # start (center of current cell or current pos if waiting)
-var _b: Vector3 = Vector3.ZERO     # target (center of next cell)
-var _v: Vector3 = Vector3.ZERO
-var _L: float = 0.0
-var _tangent: Vector3 = Vector3.FORWARD
-
-var _s: float = 0.0                # distance along [0, _L]
 var _tile_w: float = 1.0
-var _stop_margin_world: float = 0.2
+var _y_plane: float = 0.0
 
-# Waiting near an edge because the planned next cell became blocked
-var _waiting_at_edge: bool = false
+var _cur_cell: Vector2i = Vector2i(-9999, -9999)
+var _planned_next: Vector2i = Vector2i(-9999, -9999)
+var _tile_target: Vector3 = Vector3.ZERO      # where to go inside the planned_next tile
+var _tile_tangent: Vector3 = Vector3.FORWARD  # for facing
 
-# Path-change debounce (we still ignore mid-segment route changes)
-@export var path_change_cooldown: float = 0.12
-var _path_change_timer: float = 0.0
-var _pending_path_change: bool = false
+var _lane_signature: float = 0.0              # per-enemy [-1,1]
+var _needs_replan: bool = false               # set on board change
 
-# ===================== Optional first step into board =====================
+# Optional entry glide from edge/pen
 var _entry_active: bool = false
 var _entry_target: Vector3 = Vector3.ZERO
 @export var _entry_radius: float = 0.4
@@ -55,11 +43,9 @@ var _entry_target: Vector3 = Vector3.ZERO
 # ===================== Lifecycle =====================
 func _ready() -> void:
 	add_to_group("enemy")
-
 	motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
 	floor_snap_length = 0.0
 
-	# Resolve references
 	if tile_board_path != NodePath(""):
 		_board = get_node_or_null(tile_board_path)
 	if goal_node_path != NodePath(""):
@@ -69,28 +55,28 @@ func _ready() -> void:
 		if typeof(g) == TYPE_OBJECT and g != null and g is Node3D:
 			_goal = g
 
-	# Cache tile size
 	if _board and _board.has_method("tile_world_size"):
 		_tile_w = float(_board.call("tile_world_size"))
 	else:
-		var tv: Variant = 1.0
-		if _board:
-			tv = _board.get("tile_size")
+		var tv: Variant = _board.get("tile_size") if _board else 1.0
 		_tile_w = float(tv) if (typeof(tv) == TYPE_FLOAT or typeof(tv) == TYPE_INT) else 1.0
 
-	_stop_margin_world = maxf(0.05, stop_margin_tiles * _tile_w)
+	_y_plane = global_position.y
+	_lane_signature = randf_range(-1.0, 1.0)
 
-	if _y_lock_enabled:
-		_y_plane = global_position.y
-
-	# Listen for path changes (we’ll only act at boundaries / wait state)
 	if _board and _board.has_signal("global_path_changed"):
 		_board.connect("global_path_changed", Callable(self, "_on_board_changed"))
 
-	_init_segment(true)
+	velocity = Vector3.ZERO
+	_cur_cell = _board_cell_of_pos(global_position)
+	_plan_from_cell(_cur_cell)  # initial plan
 
 func reset_for_spawn() -> void:
-	_init_segment(true)
+	velocity = Vector3.ZERO
+	_lane_signature = randf_range(-1.0, 1.0)
+	_cur_cell = _board_cell_of_pos(global_position)
+	_plan_from_cell(_cur_cell)
+	_entry_active = false
 
 func set_entry_target(p: Vector3, radius: float) -> void:
 	_entry_target = p
@@ -99,13 +85,11 @@ func set_entry_target(p: Vector3, radius: float) -> void:
 
 # ===================== Helpers =====================
 func _apply_y_lock(p: Vector3) -> Vector3:
-	if _y_lock_enabled: p.y = _y_plane
+	p.y = _y_plane
 	return p
 
 func _board_cell_of_pos(p: Vector3) -> Vector2i:
-	if _board and _board.has_method("world_to_cell"):
-		return _board.call("world_to_cell", p)
-	return Vector2i(0, 0)
+	return _board.call("world_to_cell", p) if (_board and _board.has_method("world_to_cell")) else Vector2i.ZERO
 
 func _cell_center(c: Vector2i) -> Vector3:
 	if _board and _board.has_method("cell_center"):
@@ -120,158 +104,141 @@ func _goal_cell() -> Vector2i:
 	return _board_cell_of_pos(_goal.global_position) if _goal else _board_cell_of_pos(global_position)
 
 func _next_from(c: Vector2i) -> Vector2i:
-	if _board and _board.has_method("next_cell_from"):
-		return _board.call("next_cell_from", c)
-	return c
+	return _board.call("next_cell_from", c) if (_board and _board.has_method("next_cell_from")) else c
 
-func _cell_blocked(c: Vector2i) -> bool:
-	if _board == null: return false
-	if _board.has_method("is_cell_reserved") and bool(_board.call("is_cell_reserved", c)):
-		return true
-	if _board.has_method("is_cell_walkable"):
-		return not bool(_board.call("is_cell_walkable", c))
-	if _board.has_method("_tile_is_walkable"):
-		return not bool(_board.call("_tile_is_walkable", c))
-	return false
+# small hash for deterministic per-tile jitter
+func _hash2f(c: Vector2i) -> float:
+	var h: int = int(c.x) * 374761393 + int(c.y) * 668265263
+	h = (h ^ (h >> 13)) * 1274126177
+	h = h ^ (h >> 16)
+	var u: float = float(h & 0x7fffffff) / float(0x7fffffff)
+	return u * 2.0 - 1.0
 
-func _rebuild_segment(new_start_from_current_pos: bool) -> void:
-	if new_start_from_current_pos:
-		_a = _apply_y_lock(global_position)
-	else:
-		_a = _cell_center(_cur_cell)
-	_b = _cell_center(_next_cell)
-	_v = _b - _a
-	_v.y = 0.0
-	_L = _v.length()
-	_tangent = (_v / _L) if _L > 0.0001 else Vector3.FORWARD
-	# project s from current pos to avoid snaps
-	var rel: Vector3 = _apply_y_lock(global_position) - _a
-	rel.y = 0.0
-	_s = clampf(rel.dot(_tangent), 0.0, _L)
+func _quantize_lane(x: float, max_off: float) -> float:
+	if num_lanes >= 2:
+		var span: float = 2.0 * max_off
+		var step: float = span / float(num_lanes - 1)
+		var idx: int = int(round((x + max_off) / step))
+		var q: float = float(idx) * step - max_off
+		return clampf(q, -max_off, max_off)
+	return x
 
-# ===================== Segment build =====================
-func _init_segment(fresh_spawn: bool) -> void:
-	_pending_path_change = false
-	_path_change_timer = 0.0
-	_waiting_at_edge = false
-	if _board == null: return
+func _max_lane_abs() -> float:
+	return minf(_tile_w * 0.45, lane_spread_tiles * _tile_w)
 
-	_cur_cell = _board_cell_of_pos(global_position)
-	_next_cell = _next_from(_cur_cell)
-	_rebuild_segment(false)
+# Re-plan from the current cell. Called on tile entry, and whenever board says flow changed.
+func _plan_from_cell(c: Vector2i) -> void:
+	var n: Vector2i = _next_from(c)
+	_planned_next = n
+
+	# Goal cell? head to its center then despawn
+	if n == c:
+		_tile_target = _cell_center(_goal_cell())
+		_tile_tangent = (_tile_target - global_position).normalized()
+		return
+
+	var a := _cell_center(c)
+	var b := _cell_center(n)
+	var d := b - a
+	d.y = 0.0
+	var L := d.length()
+	var tan := (d / L) if L > 0.0001 else Vector3.FORWARD
+	var perp := Vector3(-tan.z, 0.0, tan.x)
+
+	# choose a lateral offset for *this tile* (stable + varied)
+	var max_off := _max_lane_abs()
+	var lane := lane_bias_strength * _lane_signature * max_off
+	lane += _hash2f(c) * (lane_jitter_tiles * _tile_w)
+	lane = _quantize_lane(clampf(lane, -max_off, max_off), max_off)
+
+	_tile_target = b + perp * lane
+	_tile_tangent = tan
+	_needs_replan = false
+
+func _accelerate_toward(v: Vector3, target_v: Vector3, a: float, dt: float) -> Vector3:
+	var dv := target_v - v
+	var max_dv := a * dt
+	if dv.length() > max_dv:
+		dv = dv.normalized() * max_dv
+	return v + dv
 
 # ===================== Physics =====================
 func _physics_process(delta: float) -> void:
-	# cooldown
-	if _path_change_timer > 0.0:
-		_path_change_timer = maxf(0.0, _path_change_timer - delta)
-
-	# Optional first step into the board
+	# Optional entry glide
 	if _entry_active:
-		var vstep: Vector3 = _entry_target - global_position
-		vstep.y = 0.0
-		var Ls: float = vstep.length()
-		if Ls <= _entry_radius:
+		var to_target: Vector3 = _entry_target - global_position
+		to_target.y = 0.0
+		var L := to_target.length()
+		if L <= _entry_radius:
 			_entry_active = false
-			_init_segment(false)
-		else:
-			var step_entry: float = minf(speed * delta, Ls)
-			if step_entry > 0.0001:
-				global_position = _apply_y_lock(global_position + (vstep / Ls) * step_entry)
-			_update_facing_toward(vstep, delta)
 			velocity = Vector3.ZERO
-			return
-
-	# If waiting at edge, poll for a new valid next cell and start from current pos
-	if _waiting_at_edge:
-		var new_next: Vector2i = _next_from(_cur_cell)
-		if new_next != _next_cell and not _cell_blocked(new_next):
-			_next_cell = new_next
-			_rebuild_segment(true)   # start new segment from where we are
-			_waiting_at_edge = false
 		else:
-			# face intended direction while waiting
-			_update_facing_toward(_tangent, delta)
-			velocity = Vector3.ZERO
+			var tv := to_target / maxf(L, 0.0001) * speed
+			velocity = _accelerate_toward(velocity, tv, accel, delta)
+			_update_facing_toward(velocity, delta)
+			velocity.y = 0.0
+			move_and_slide()
+			global_position = _apply_y_lock(global_position)
+			_emit_cell_if_changed()
 			return
 
-	# Normal advance toward edge
-	if _L <= 0.0001:
-		_advance_to_next_segment()
-		velocity = Vector3.ZERO
-		return
+	# If board said paths changed while we are *still in this tile*, re-plan for this tile.
+	if _needs_replan:
+		_plan_from_cell(_cur_cell)
 
-	var remaining: float = speed * delta
-	var take: float = minf(remaining, _L - _s)
-	_s += take
+	# If board’s suggested exit for this tile changed since last frame, re-plan.
+	var live_next := _next_from(_cur_cell)
+	if live_next != _planned_next:
+		_plan_from_cell(_cur_cell)
 
-	# Position update
-	var desired: Vector3 = _a + _tangent * _s
-	global_position = _apply_y_lock(desired)
-	_update_facing_toward(_tangent, delta)
+	# Steer toward the current tile target
+	var seek := _tile_target - global_position
+	seek.y = 0.0
+	var dist := seek.length()
 
-	# Stop-line guard: if next cell got blocked, stop short of edge and wait
-	if (_L - _s) <= _stop_margin_world and _cell_blocked(_next_cell):
-		_s = maxf(_L - _stop_margin_world, 0.0)  # clamp back to stop line
-		global_position = _apply_y_lock(_a + _tangent * _s)
-		_waiting_at_edge = true
-		velocity = Vector3.ZERO
-		return
+	# If we’re very close to the target and that target belongs to _planned_next, let the cell change drive a new plan.
+	if dist > 0.01:
+		var tv_main := (seek / dist) * speed
+		velocity = _accelerate_toward(velocity, tv_main, accel, delta)
 
-	# Reached edge?
-	if _s >= _L - 0.00001:
-		if _next_cell == _goal_cell():
-			_on_reach_goal()
-			return
-		_advance_to_next_segment()
+	# Face motion
+	_update_facing_toward(velocity, delta)
 
-	velocity = Vector3.ZERO
+	# Slide on plane
+	velocity.y = 0.0
+	move_and_slide()
+	global_position = _apply_y_lock(global_position)
 
-# ===================== Advance to next segment =====================
-func _advance_to_next_segment() -> void:
-	var old_c: Vector2i = _cur_cell
-	var new_c: Vector2i = _next_cell
-	if old_c != new_c:
-		emit_signal("cell_changed", old_c, new_c)
+	# If we entered a new cell, emit + plan from it
+	_emit_cell_if_changed()
 
-	_cur_cell = _next_cell
-	_next_cell = _next_from(_cur_cell)  # adopt latest path ONLY at boundary
-	_rebuild_segment(false)
-
-	# tiny nudge to avoid exact endpoints
-	if _L > 0.0 and _s <= 0.0:
-		_s = minf(0.0005, _L * 0.05)
-
-	_pending_path_change = false
-	_waiting_at_edge = false
-
-# ===================== Path-change handler =====================
-func _on_board_changed() -> void:
-	if _board == null: return
-	# debounce
-	if _path_change_timer > 0.0:
-		_pending_path_change = true
-		return
-	_path_change_timer = path_change_cooldown
-
-	# We do not re-route mid-segment anymore.
-	# If the planned next cell is blocked we’ll get caught by the stop-line guard
-	# and wait for a new next cell at the boundary.
-	_pending_path_change = true
+func _emit_cell_if_changed() -> void:
+	var new_cell := _board_cell_of_pos(global_position)
+	if new_cell != _cur_cell:
+		var old := _cur_cell
+		_cur_cell = new_cell
+		emit_signal("cell_changed", old, new_cell)
+		_plan_from_cell(_cur_cell)   # <<< re-plan every tile entry
 
 # ===================== Facing =====================
 func _update_facing_toward(dir_or_vec: Vector3, delta: float) -> void:
-	var v: Vector3 = dir_or_vec
-	if v.length_squared() < 1e-8: return
-	var desired_fwd: Vector3 = v.normalized()
+	var v := dir_or_vec; v.y = 0.0
+	if v.length_squared() < 1e-8:
+		return
+	var desired_fwd := v.normalized()
 	var current_fwd: Vector3 = -global_transform.basis.z
 	current_fwd.y = 0.0
 	if current_fwd.length_squared() <= 1e-8:
 		current_fwd = Vector3.FORWARD
-	var angle: float = current_fwd.signed_angle_to(desired_fwd, Vector3.UP)
-	var max_step: float = deg_to_rad(turn_speed_deg) * delta
+	var angle := current_fwd.signed_angle_to(desired_fwd, Vector3.UP)
+	var max_step := deg_to_rad(turn_speed_deg) * delta
 	angle = clampf(angle, -max_step, max_step)
 	rotate_y(angle)
+
+# ===================== Board change =====================
+func _on_board_changed() -> void:
+	# Don’t snap mid-tile; just request a re-plan for the current tile on next physics step.
+	_needs_replan = true
 
 # ===================== Goal =====================
 func _on_reach_goal() -> void:
