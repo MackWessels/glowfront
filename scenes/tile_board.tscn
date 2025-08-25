@@ -1,10 +1,9 @@
-[gd_scene load_steps=7 format=3 uid="uid://b3dnbvtjgt0fw"]
+[gd_scene load_steps=6 format=3 uid="uid://b3dnbvtjgt0fw"]
 
 [ext_resource type="Script" uid="uid://ca8don34xaocj" path="res://scripts/tile_board.gd" id="1_58eyr"]
 [ext_resource type="PackedScene" uid="uid://bejcwxqtu5216" path="res://scenes/tile.tscn" id="2_jdbot"]
 [ext_resource type="PackedScene" uid="uid://4r5ok51tc656" path="res://scenes/enemy_spawner.tscn" id="3_2x8nh"]
 [ext_resource type="PackedScene" uid="uid://bnpwkqho7ndgk" path="res://scenes/goal.tscn" id="4_ijtfa"]
-[ext_resource type="PackedScene" uid="uid://bksm503hl2ahi" path="res://scenes/enemy.tscn" id="4_pvr1k"]
 [ext_resource type="PackedScene" uid="uid://dmvugjewscsdl" path="res://scenes/placement_menu.tscn" id="5_jdbot"]
 
 [node name="TileBoard" type="Node3D" node_paths=PackedStringArray("goal_node", "spawner_node", "placement_menu", "enemy_spawner")]
@@ -17,7 +16,6 @@ enemy_spawner = NodePath("EnemySpawner")
 
 [node name="EnemySpawner" parent="." instance=ExtResource("3_2x8nh")]
 tile_board_path = NodePath("..")
-enemy_scene = ExtResource("4_pvr1k")
 
 [node name="Goal" parent="." instance=ExtResource("4_ijtfa")]
 
