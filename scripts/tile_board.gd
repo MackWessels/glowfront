@@ -3,7 +3,8 @@ extends Node3D
 # =============================================================================
 # Inspector
 # =============================================================================
-@export var spawner_span: int = 3        # width (in cells) across the spawner edge
+@export var spawner_span: int = 3
+@export var goal_span: int = 1
 @export var board_size_x: int = 10
 @export var board_size_z: int = 11
 @export var tile_scene: PackedScene
@@ -11,15 +12,44 @@ extends Node3D
 @export var goal_node: Node3D
 @export var spawner_node: Node3D
 @export var placement_menu: PopupMenu
-@export var enemy_spawner: Node3D
 
 # Economy
 @export var turret_cost: int = 10
 
-# Single enemy group used for occupancy checks
-const ENEMY_GROUP: String = "enemy"
+# Bounds & pens
+@export var use_bounds: bool = true
+@export var carve_openings_for_portals: bool = true
+@export var wall_thickness: float = 0.35
+@export var wall_height: float = 2.5
 
-# Pending polling rate
+# Show debug meshes for BOTH boundary walls & pens (hot-toggle rebuild)
+var _debug_mesh_enabled := true
+@export var render_debug_wall_mesh := true:
+	set(value):
+		_debug_mesh_enabled = value
+		if is_inside_tree() and use_bounds:
+			_create_bounds()
+	get:
+		return _debug_mesh_enabled
+
+# Collision bits (Enemy on Layer 3, mask includes 2)
+@export var wall_collision_layer: int = 1 << 1   # layer 2
+@export var wall_collision_mask:  int = 1 << 2   # hit layer 3
+
+# Pens
+@export var build_spawn_pen: bool = true
+@export var build_goal_pen: bool = true
+@export var pen_depth_cells: int = 1
+@export var pen_wing_cells: int = 0
+@export var pen_thickness: float = 0.35
+@export var pen_height: float = 2.5
+@export var pen_entry_inset: float = 0.30   # pull wings back from the board edge (world units)
+
+# Flow
+@export var goal_points_outward: bool = true
+
+# Groups / polling
+const ENEMY_GROUP: String = "enemy"
 const PENDING_POLL_HZ := 6.0
 
 # =============================================================================
@@ -33,35 +63,21 @@ signal global_path_changed
 var tiles: Dictionary = {}
 var active_tile: Node = null
 
-# highlight/pending
 var _pending_tile: Node = null
-
-# soft reservations (temporarily non-walkable)
 var _reserved_cells: Dictionary = {}          # Vector2i -> true
-
-# builds waiting for enemies to step off
 var _pending_builds: Array[Dictionary] = []   # {"cell":Vector2i,"tile":Node,"action":String,"cost":int}
 
-# legacy compat (not used for paint)
-var closing: Dictionary = {}
+var cost: Dictionary = {}      # Vector2i -> int
+var dir_field: Dictionary = {} # Vector2i -> Vector3
 
-# flow-field
-var cost: Dictionary = {}      # Vector2i -> int (BFS distance from goal)
-var dir_field: Dictionary = {} # Vector2i -> Vector3 (unit dir toward lower cost)
-
-# grid
 var _grid_origin: Vector3 = Vector3.ZERO
 var _step: float = 1.0
-
-# polling accumulator
 var _poll_accum: float = 0.0
 
-# 4-connected
 const ORTHO_DIRS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0),
 	Vector2i(0, 1), Vector2i(0, -1)
 ]
-
 const EPS := 0.0001
 
 # =============================================================================
@@ -74,18 +90,18 @@ func _ready() -> void:
 	_grid_origin = origin_tile.global_position
 	_step = tile_size
 
-	# keep portal placement intact
 	position_portal(goal_node, "right")
 	position_portal(spawner_node, "left")
 
+	if use_bounds:
+		_create_bounds()
+
 	_recompute_flow()
 
-	# Placement menu
 	if placement_menu and not placement_menu.is_connected("place_selected", Callable(self, "_on_place_selected")):
 		placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
 
 func _physics_process(delta: float) -> void:
-	# Poll pending builds at a gentle rate to avoid per-frame work
 	if _pending_builds.size() > 0:
 		_poll_accum += delta
 		var interval := 1.0 / PENDING_POLL_HZ
@@ -93,8 +109,13 @@ func _physics_process(delta: float) -> void:
 			_poll_accum = 0.0
 			_poll_pending_builds()
 
+# Manual helper (change sizes/toggles at runtime)
+func rebuild_bounds() -> void:
+	if use_bounds:
+		_create_bounds()
+
 # =============================================================================
-# Public helpers needed by Enemy
+# Public helpers (used by Enemy)
 # =============================================================================
 func tile_world_size() -> float:
 	return _step
@@ -102,18 +123,16 @@ func tile_world_size() -> float:
 func cell_center(c: Vector2i) -> Vector3:
 	return cell_to_world(c)
 
-# Back-compat name if you use it elsewhere
-func tile_center(c: Vector2i) -> Vector3:
-	return cell_to_world(c)
+func is_in_bounds(c: Vector2i) -> bool:
+	return _in_bounds(c)
 
 # =============================================================================
-# Pending/highlight manager
+# Pending/highlight
 # =============================================================================
 func set_active_tile(tile: Node) -> void:
 	if tile == _pending_tile:
 		active_tile = tile
 		return
-
 	_clear_pending()
 	if tile and is_instance_valid(tile) and tile.has_method("set_pending_blue"):
 		_pending_tile = tile
@@ -132,7 +151,7 @@ func _clear_pending() -> void:
 	active_tile = null
 
 # =============================================================================
-# Economy helpers
+# Economy (kept for placement)
 # =============================================================================
 func _econ_balance() -> int:
 	if Economy.has_method("balance"):
@@ -205,11 +224,10 @@ func generate_board() -> void:
 			tile.set("grid_position", pos)
 			tile.set("tile_board", self)
 			tile.set("placement_menu", placement_menu)
-
 			tiles[pos] = tile
 
 # =============================================================================
-# Portals positioning (no pens/walls) — KEEPING INTACT
+# Portals
 # =============================================================================
 func position_portal(portal: Node3D, side: String) -> void:
 	var mid_x: int = board_size_x >> 1
@@ -228,15 +246,10 @@ func position_portal(portal: Node3D, side: String) -> void:
 			pos = Vector2i(mid_x, board_size_z - 1);  rotation_y = PI
 
 	var tile := tiles.get(pos, null) as Node3D
-	var target_pos: Vector3
-	if tile != null:
-		target_pos = tile.global_position
-	else:
-		target_pos = cell_to_world(pos)
+	var target_pos: Vector3 = tile.global_position if tile != null else cell_to_world(pos)
 	portal.global_position = target_pos
 	portal.rotation.y = rotation_y
 
-# Simple getters
 func get_spawn_position() -> Vector3:
 	return spawner_node.global_position
 func get_goal_position()  -> Vector3:
@@ -262,7 +275,6 @@ func _grid_bounds() -> Rect2i:
 func _in_bounds(c: Vector2i) -> bool:
 	return c.x >= 0 and c.x < board_size_x and c.y >= 0 and c.y < board_size_z
 
-# Which edge a cell sits on (relative to board bounds)
 func _side_of_cell(cell: Vector2i, b: Rect2i) -> String:
 	var left_i := b.position.x
 	var top_i := b.position.y
@@ -277,15 +289,38 @@ func _side_of_cell(cell: Vector2i, b: Rect2i) -> String:
 	else:
 		return "bottom"
 
+func _outward_dir_for_cell(cell: Vector2i) -> Vector3:
+	var b := _grid_bounds()
+	var side := _side_of_cell(cell, b)
+	var interior_step := Vector2i.ZERO
+	match side:
+		"left":   interior_step = Vector2i(1, 0)
+		"right":  interior_step = Vector2i(-1, 0)
+		"top":    interior_step = Vector2i(0, 1)
+		"bottom": interior_step = Vector2i(0, -1)
+	var base := cell_to_world(cell)
+	var into_board := cell_to_world(cell + interior_step) - base
+	if into_board.length() < 0.0001:
+		return Vector3.ZERO
+	return (-into_board).normalized()
+
+func _outward_step_for_cell(cell: Vector2i) -> Vector2i:
+	var b := _grid_bounds()
+	match _side_of_cell(cell, b):
+		"left": return Vector2i(-1, 0)
+		"right": return Vector2i(1, 0)
+		"top": return Vector2i(0, -1)
+		"bottom": return Vector2i(0, 1)
+	return Vector2i.ZERO
+
 # =============================================================================
-# Spawner helpers (pen-less, conveyor-friendly)
+# Spawner helpers
 # =============================================================================
 func get_spawn_pen(span: int = -1) -> Dictionary:
 	if span <= 0:
 		span = spawner_span
 	var b := _grid_bounds()
 
-	# snap spawner to the nearest edge cell
 	var sp_world: Vector3 = spawner_node.global_position
 	var sp_cell: Vector2i = world_to_cell(sp_world)
 	var side := _side_of_cell(sp_cell, b)
@@ -314,7 +349,6 @@ func get_spawn_pen(span: int = -1) -> Dictionary:
 	@warning_ignore("integer_division")
 	var half_i: int = int(span / 2)
 
-	# collect a centered run of edge cells
 	var board_cells: Array[Vector2i] = []
 	for i in range(-half_i, half_i + 1):
 		var c := edge_cell + lateral * i
@@ -322,29 +356,20 @@ func get_spawn_pen(span: int = -1) -> Dictionary:
 		c.y = clampi(c.y, b.position.y, b.position.y + b.size.y - 1)
 		board_cells.append(c)
 
-	# dedupe (in case of clamps)
 	var seen: Dictionary = {}
 	var entry_targets: Array[Vector3] = []
-	for c in board_cells:
-		var key := str(c.x, ",", c.y)
+	for c2 in board_cells:
+		var key := str(c2.x, ",", c2.y)
 		if not seen.has(key):
 			seen[key] = true
-			entry_targets.append(cell_to_world(c))
+			entry_targets.append(cell_to_world(c2))
 
-	# forward/lateral in world space
 	var base_w := cell_to_world(edge_cell)
 	var fwd3 := cell_to_world(edge_cell + normal) - base_w
 	var lat3 := cell_to_world(edge_cell + lateral) - base_w
-	if fwd3.length() < 0.001:
-		fwd3 = Vector3.FORWARD
-	else:
-		fwd3 = fwd3.normalized()
-	if lat3.length() < 0.001:
-		lat3 = Vector3.RIGHT
-	else:
-		lat3 = lat3.normalized()
+	fwd3 = Vector3.FORWARD if fwd3.length() < 0.001 else fwd3.normalized()
+	lat3 = Vector3.RIGHT   if lat3.length() < 0.001 else lat3.normalized()
 
-	# No outside pen; spawn right on the edge cells
 	var pen_centers := entry_targets.duplicate()
 
 	return {
@@ -365,6 +390,14 @@ func spawn_pen_cells(span: int = -1) -> Array[Vector2i]:
 		cells.append(world_to_cell(pw))
 	return cells
 
+# NEW: check if a cell is inside the spawner opening span
+func _is_in_spawn_opening(cell: Vector2i, span: int = -1) -> bool:
+	var cells := spawn_pen_cells(span)
+	for c in cells:
+		if c == cell:
+			return true
+	return false
+
 # =============================================================================
 # Flow-field + reservations
 # =============================================================================
@@ -375,56 +408,49 @@ func _recompute_flow() -> bool:
 	var goal_cell: Vector2i  = _goal_cell()
 	var spawn_cell: Vector2i = world_to_cell(spawner_node.global_position)
 
-	# BFS from goal across walkable tiles
 	if _tile_is_walkable(goal_cell):
 		new_cost[goal_cell] = 0
 		var q: Array[Vector2i] = [goal_cell]
 		var head := 0
 		while head < q.size():
-			var cur: Vector2i = q[head]
-			head += 1
+			var cur: Vector2i = q[head]; head += 1
 			var cur_cost: int = int(new_cost[cur])
-
 			for o in ORTHO_DIRS:
 				var nb: Vector2i = cur + o
-				if not _tile_is_walkable(nb):
-					continue
-				if new_cost.has(nb):
-					continue
+				if not _tile_is_walkable(nb): continue
+				if new_cost.has(nb): continue
 				new_cost[nb] = cur_cost + 1
 				q.append(nb)
 
 	if not new_cost.has(spawn_cell):
 		return false
 
-	# At each cell, point toward a neighbor with lower cost (greedy gradient)
 	for key in new_cost.keys():
 		var cell: Vector2i = key
 		var dir_v := Vector3.ZERO
-
 		if cell != goal_cell:
 			var best := cell
 			var best_val := int(new_cost[cell])
 			for o2 in ORTHO_DIRS:
 				var nb2 := cell + o2
 				if new_cost.has(nb2) and int(new_cost[nb2]) < best_val:
-					best_val = int(new_cost[nb2])
-					best = nb2
+					best_val = int(new_cost[nb2]); best = nb2
 			if best != cell:
 				var d := cell_to_world(best) - cell_to_world(cell)
 				d.y = 0.0
 				var L := d.length()
 				if L > EPS:
 					dir_v = d / L
-		# goal cell keeps ZERO vector (arrival)
-
 		new_dir[cell] = dir_v
 
-	# Provide an escape direction for reserved cells so enemies can leave
+	if goal_points_outward:
+		var outward := _outward_dir_for_cell(goal_cell)
+		if outward.length_squared() > 1e-6:
+			new_dir[goal_cell] = outward
+
 	for r_key in _reserved_cells.keys():
 		var r_cell: Vector2i = r_key
-		if new_dir.has(r_cell):
-			continue
+		if new_dir.has(r_cell): continue
 		var found := false
 		var best_nb := r_cell
 		var best_val := 0x3fffffff
@@ -433,9 +459,7 @@ func _recompute_flow() -> bool:
 			if new_cost.has(nb3):
 				var v := int(new_cost[nb3])
 				if not found or v < best_val:
-					found = true
-					best_val = v
-					best_nb = nb3
+					found = true; best_val = v; best_nb = nb3
 		var dir_r := Vector3.ZERO
 		if found:
 			var d2 := cell_to_world(best_nb) - cell_to_world(r_cell)
@@ -466,12 +490,61 @@ func _tile_is_walkable(cell: Vector2i) -> bool:
 	return tower == null
 
 # =============================================================================
-# Enemy steering API (optional smooth sampling)
+# Enemy-facing API
 # =============================================================================
+func next_cell_from(c: Vector2i) -> Vector2i:
+	var g := _goal_cell()
+	if c == g:
+		if goal_points_outward:
+			var step := _outward_step_for_cell(g)
+			if step != Vector2i.ZERO:
+				return g + step  # off-grid (intended)
+		return g
+
+	if not _in_bounds(c):
+		return c
+
+	var best := c
+	var have_best := false
+	var best_val := 0
+
+	if cost.has(c):
+		var cur_val := int(cost[c])
+		for o in ORTHO_DIRS:
+			var nb := c + o
+			if cost.has(nb):
+				var nb_val := int(cost[nb])
+				if nb_val < cur_val:
+					if not have_best or nb_val < best_val:
+						best = nb; best_val = nb_val; have_best = true
+	if have_best:
+		return best
+
+	if dir_field.has(c):
+		var v: Vector3 = dir_field[c]
+		if v.length_squared() > 0.0:
+			var step2 := Vector2i.ZERO
+			if absf(v.x) >= absf(v.z):
+				step2.x = signi(v.x)
+			else:
+				step2.y = signi(v.z)
+			var n := c + step2
+			n.x = clampi(n.x, 0, board_size_x - 1)
+			n.y = clampi(n.y, 0, board_size_z - 1)
+			return n
+
+	var gg := _goal_cell()
+	var dx := signi(gg.x - c.x)
+	var dz := signi(gg.y - c.y)
+	if abs(gg.x - c.x) >= abs(gg.y - c.y):
+		return Vector2i(clampi(c.x + dx, 0, board_size_x - 1), c.y)
+	else:
+		return Vector2i(c.x, clampi(c.y + dz, 0, board_size_z - 1))
+
+# Optional smooth sampler (kept for other agents)
 func sample_flow_dir_smooth(world_pos: Vector3) -> Vector3:
 	var fx := (world_pos.x - _grid_origin.x) / _step
 	var fz := (world_pos.z - _grid_origin.z) / _step
-
 	var max_xf := float(board_size_x - 1) - 0.001
 	var max_zf := float(board_size_z - 1) - 0.001
 	fx = clampf(fx, 0.0, max_xf)
@@ -500,62 +573,12 @@ func sample_flow_dir_smooth(world_pos: Vector3) -> Vector3:
 	var a := d00 * (1.0 - u) + d10 * u
 	var b := d01 * (1.0 - u) + d11 * u
 	var blended := a * (1.0 - v) + b * v
-
 	if blended.length_squared() < 1e-6:
 		return Vector3.ZERO
 	return blended.normalized()
 
-# Convert flow/cost to a reliable next grid cell (used by Enemy segment walker)
-func next_cell_from(c: Vector2i) -> Vector2i:
-	if c == _goal_cell():
-		return c
-	if not _in_bounds(c):
-		return c
-
-	var best := c
-	var have_best := false
-	var best_val := 0
-
-	if cost.has(c):
-		var cur_val := int(cost[c])
-		for o in ORTHO_DIRS:
-			var nb := c + o
-			if cost.has(nb):
-				var nb_val := int(cost[nb])
-				if nb_val < cur_val:
-					if not have_best or nb_val < best_val:
-						best = nb
-						best_val = nb_val
-						have_best = true
-
-	if have_best:
-		return best
-
-	# Fallback: use dir_field step if present (helps enemies leave reserved cells)
-	if dir_field.has(c):
-		var v: Vector3 = dir_field[c]
-		if v.length_squared() > 0.0:
-			var step := Vector2i.ZERO
-			if absf(v.x) >= absf(v.z):
-				step.x = signi(v.x)
-			else:
-				step.y = signi(v.z)
-			var n := c + step
-			n.x = clampi(n.x, 0, board_size_x - 1)
-			n.y = clampi(n.y, 0, board_size_z - 1)
-			return n
-
-	# Final fallback: greedy toward goal by larger axis gap
-	var g := _goal_cell()
-	var dx := signi(g.x - c.x)
-	var dz := signi(g.y - c.y)
-	if abs(g.x - c.x) >= abs(g.y - c.y):
-		return Vector2i(clampi(c.x + dx, 0, board_size_x - 1), c.y)
-	else:
-		return Vector2i(c.x, clampi(c.y + dz, 0, board_size_z - 1))
-
 # =============================================================================
-# Enemy detection & reservations (polling version)
+# Enemy detection & reservations (for placement safety)
 # =============================================================================
 func _enemies_on_cell(cell: Vector2i) -> Array:
 	var out: Array = []
@@ -575,13 +598,10 @@ func is_cell_reserved(cell: Vector2i) -> bool:
 func _reserve_cell(cell: Vector2i, enable: bool) -> void:
 	if enable:
 		_reserved_cells[cell] = true
-	else:
-		if _reserved_cells.has(cell):
-			_reserved_cells.erase(cell)
+	elif _reserved_cells.has(cell):
+		_reserved_cells.erase(cell)
 
-# Check each pending build; if cell empty, commit
 func _poll_pending_builds() -> void:
-	# iterate from end so remove_at is safe
 	for i in range(_pending_builds.size() - 1, -1, -1):
 		var item: Dictionary = _pending_builds[i]
 		var cell: Vector2i = item["cell"]
@@ -590,40 +610,32 @@ func _poll_pending_builds() -> void:
 			_reserved_cells.erase(cell)
 			_pending_builds.remove_at(i)
 			continue
-
-		var occ := _enemies_on_cell(cell)
-		if occ.size() == 0:
+		if _enemies_on_cell(cell).size() == 0:
 			_commit_pending_item(i)
 
 func _commit_pending_item(index: int) -> void:
 	if index < 0 or index >= _pending_builds.size():
 		return
-
 	var item: Dictionary = _pending_builds[index]
 	var cell: Vector2i = item["cell"]
 	var tile: Node = item["tile"]
 	var action_str: String = String(item["action"])
 	var cval: int = int(item["cost"])
 
-	# Clear blue highlight
 	if tile and tile.has_method("set_pending_blue"):
 		tile.call("set_pending_blue", false)
 
-	# Release reservation (we’re about to place)
 	_reserve_cell(cell, false)
 
-	# Place
 	if tile and tile.has_method("apply_placement"):
 		tile.call("apply_placement", action_str)
 
-	# Recompute path; if fails, break and restore flow
 	var ok := _recompute_flow()
 	if not ok:
 		if tile and tile.has_method("break_tile"):
 			tile.call("break_tile")
 		_recompute_flow()
 	else:
-		# Charge if placement truly succeeded
 		var placed_ok := _placement_succeeded(tile, action_str)
 		if placed_ok and cval > 0:
 			var paid := _econ_spend(cval)
@@ -650,7 +662,15 @@ func _on_place_selected(action: String) -> void:
 		return
 
 	if blocks:
-		# 1) If it would block the path -> break (red) and stop
+		# Disallow placements on any cell in the spawner opening span
+		if _is_in_spawn_opening(pos, spawner_span):
+			if active_tile.has_method("break_tile"):
+				active_tile.call("break_tile")
+			emit_signal("global_path_changed")
+			_clear_pending()
+			return
+
+		# 1) Would block path? -> break (red)
 		_reserve_cell(pos, true)
 		var ok_path := _recompute_flow()
 		_reserve_cell(pos, false)
@@ -662,9 +682,8 @@ func _on_place_selected(action: String) -> void:
 			_clear_pending()
 			return
 
-		# 2) Path OK but an enemy stands on it -> blue pending (poll until clear)
-		var occ := _enemies_on_cell(pos)
-		if occ.size() > 0:
+		# 2) Enemy on cell? -> pending (blue)
+		if _enemies_on_cell(pos).size() > 0:
 			if active_tile.has_method("set_pending_blue"):
 				active_tile.call("set_pending_blue", true)
 			_reserve_cell(pos, true)
@@ -673,15 +692,14 @@ func _on_place_selected(action: String) -> void:
 			emit_signal("global_path_changed")
 			return
 
-		# 3) Clear -> build immediately
+		# 3) Clear -> build now
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
-
 		if active_tile.has_method("apply_placement"):
 			active_tile.call("apply_placement", action)
 
-		var ok := _recompute_flow()
-		if not ok:
+		var ok2 := _recompute_flow()
+		if not ok2:
 			if active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
 			_recompute_flow()
@@ -709,7 +727,7 @@ func _on_place_selected(action: String) -> void:
 	_clear_pending()
 
 # =============================================================================
-# PowerUps adapter (optional)
+# PowerUps adapter
 # =============================================================================
 func _power_cost_for(action: String) -> int:
 	var base := _cost_for_action(action)
@@ -722,11 +740,209 @@ func _power_cost_for(action: String) -> int:
 # Queue helper
 # =============================================================================
 func _queue_pending_build(cell: Vector2i, tile: Node, action: String, cost_val: int) -> void:
-	var item: Dictionary = {
-		"cell": cell,
-		"tile": tile,
-		"action": action,
-		"cost": cost_val
-	}
+	var item: Dictionary = {"cell": cell, "tile": tile, "action": action, "cost": cost_val}
 	_pending_builds.append(item)
-	_poll_accum = 0.0  # nudge poll soon after queuing
+	_poll_accum = 0.0
+
+# =============================================================================
+# --------- BOUNDS & PENS ----------
+# =============================================================================
+func _create_bounds() -> void:
+	var old := get_node_or_null("BoardBounds")
+	if old:
+		old.queue_free()
+
+	var container := Node3D.new()
+	container.name = "BoardBounds"
+	add_child(container)
+
+	var left_x: float   = _grid_origin.x - _step * 0.5
+	var right_x: float  = _grid_origin.x + (board_size_x - 0.5) * _step
+	var top_z: float    = _grid_origin.z - _step * 0.5
+	var bottom_z: float = _grid_origin.z + (board_size_z - 0.5) * _step
+
+	var openings: Dictionary = {"left": [], "right": [], "top": [], "bottom": []}
+
+	if carve_openings_for_portals:
+		var b := _grid_bounds()
+
+		var sp_cell := world_to_cell(spawner_node.global_position)
+		var sp_side := _side_of_cell(sp_cell, b)
+		var sp_edge := sp_cell
+		if sp_side == "left":   sp_edge.x = b.position.x
+		elif sp_side == "right": sp_edge.x = b.position.x + b.size.x - 1
+		elif sp_side == "top":   sp_edge.y = b.position.y
+		else:                    sp_edge.y = b.position.y + b.size.y - 1
+		var sp_open: Vector2 = _opening_range_for(sp_side, sp_edge, spawner_span)
+		openings[sp_side].append(sp_open)
+
+		var gl_cell := world_to_cell(goal_node.global_position)
+		var gl_side := _side_of_cell(gl_cell, b)
+		var gl_edge := gl_cell
+		if gl_side == "left":    gl_edge.x = b.position.x
+		elif gl_side == "right": gl_edge.x = b.position.x + b.size.x - 1
+		elif gl_side == "top":   gl_edge.y = b.position.y
+		else:                    gl_edge.y = b.position.y + b.size.y - 1
+		var gl_open: Vector2 = _opening_range_for(gl_side, gl_edge, max(1, goal_span))
+		openings[gl_side].append(gl_open)
+
+	_build_side_walls(container, "top",    top_z,    left_x, right_x, openings["top"])
+	_build_side_walls(container, "bottom", bottom_z, left_x, right_x, openings["bottom"])
+	_build_side_walls(container, "left",   left_x,   top_z,  bottom_z, openings["left"])
+	_build_side_walls(container, "right",  right_x,  top_z,  bottom_z, openings["right"])
+
+	if build_spawn_pen or build_goal_pen:
+		_build_pens_for(container, openings)
+
+func _build_side_walls(parent: Node3D, side: String, side_line: float, min_lateral: float, max_lateral: float, open_list: Array) -> void:
+	var cuts: Array[float] = []
+	for o in open_list:
+		var v2: Vector2 = o
+		cuts.append(v2.x); cuts.append(v2.y)
+	cuts.append(min_lateral); cuts.append(max_lateral)
+	cuts.sort()
+
+	for i in range(0, cuts.size() - 1):
+		var a: float = cuts[i]
+		var b: float = cuts[i + 1]
+
+		var is_open: bool = false
+		for oo in open_list:
+			var v: Vector2 = oo
+			if absf(a - v.x) < 0.0001 and absf(b - v.y) < 0.0001:
+				is_open = true; break
+		if is_open:
+			continue
+
+		var center: Vector3
+		var size_x: float
+		var size_z: float
+
+		if side == "top" or side == "bottom":
+			if b - a <= 0.0001: continue
+			center = Vector3((a + b) * 0.5, 0.0, side_line)
+			size_x = (b - a)
+			size_z = wall_thickness
+		else:
+			if b - a <= 0.0001: continue
+			center = Vector3(side_line, 0.0, (a + b) * 0.5)
+			size_x = wall_thickness
+			size_z = (b - a)
+
+		_make_wall(parent, center, size_x, size_z, wall_height, "Wall_%s_%d" % [side, i])
+
+func _opening_range_for(side: String, edge_cell: Vector2i, span: int) -> Vector2:
+	if span <= 0:
+		span = 1
+	@warning_ignore("integer_division")
+	var half_i: int = int(span / 2)
+
+	if side == "top" or side == "bottom":
+		var start_x: float = _grid_origin.x + float(edge_cell.x - half_i) * _step - 0.5 * _step
+		var end_x: float   = _grid_origin.x + float(edge_cell.x + half_i) * _step + 0.5 * _step
+		return Vector2(start_x, end_x)
+	else:
+		var start_z: float = _grid_origin.z + float(edge_cell.y - half_i) * _step - 0.5 * _step
+		var end_z: float   = _grid_origin.z + float(edge_cell.y + half_i) * _step + 0.5 * _step
+		return Vector2(start_z, end_z)
+
+# Pens with wings pulled back from the board by pen_entry_inset
+func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
+	var left_x: float   = _grid_origin.x - _step * 0.5
+	var right_x: float  = _grid_origin.x + (board_size_x - 0.5) * _step
+	var top_z: float    = _grid_origin.z - _step * 0.5
+	var bottom_z: float = _grid_origin.z + (board_size_z - 0.5) * _step
+
+	var depth_w: float = float(max(0, pen_depth_cells)) * _step
+	var wing_cells: int = int(max(0, pen_wing_cells))
+	var inset: float = clampf(pen_entry_inset, 0.0, depth_w)   # cannot exceed depth
+
+	# top
+	for o in openings["top"]:
+		var v: Vector2 = o
+		var ext_a: float = max(left_x,  v.x - float(wing_cells) * _step)
+		var ext_b: float = min(right_x, v.y + float(wing_cells) * _step)
+		var inner_depth: float = depth_w - inset
+		if inner_depth <= 0.001:
+			continue
+
+		var back_c: Vector3 = Vector3((ext_a + ext_b) * 0.5, 0.0, top_z - depth_w - 0.5 * pen_thickness)
+		_make_wall(container, back_c, max(0.0, ext_b - ext_a), pen_thickness, pen_height, "PenTop_Back")
+
+		var wing_z_center: float = top_z - (depth_w + inset) * 0.5
+		_make_wall(container, Vector3(ext_a, 0.0, wing_z_center), pen_thickness, inner_depth, pen_height, "PenTop_WingL")
+		_make_wall(container, Vector3(ext_b, 0.0, wing_z_center), pen_thickness, inner_depth, pen_height, "PenTop_WingR")
+
+	# bottom
+	for o2 in openings["bottom"]:
+		var v2: Vector2 = o2
+		var ext_a2: float = max(left_x,  v2.x - float(wing_cells) * _step)
+		var ext_b2: float = min(right_x, v2.y + float(wing_cells) * _step)
+		var inner_depth2: float = depth_w - inset
+		if inner_depth2 <= 0.001:
+			continue
+
+		var back_c2: Vector3 = Vector3((ext_a2 + ext_b2) * 0.5, 0.0, bottom_z + depth_w + 0.5 * pen_thickness)
+		_make_wall(container, back_c2, max(0.0, ext_b2 - ext_a2), pen_thickness, pen_height, "PenBottom_Back")
+
+		var wing_z_center2: float = bottom_z + (depth_w + inset) * 0.5
+		_make_wall(container, Vector3(ext_a2, 0.0, wing_z_center2), pen_thickness, inner_depth2, pen_height, "PenBottom_WingL")
+		_make_wall(container, Vector3(ext_b2, 0.0, wing_z_center2), pen_thickness, inner_depth2, pen_height, "PenBottom_WingR")
+
+	# left
+	for o3 in openings["left"]:
+		var v3: Vector2 = o3
+		var ext_a3: float = max(top_z,    v3.x - float(wing_cells) * _step)
+		var ext_b3: float = min(bottom_z, v3.y + float(wing_cells) * _step)
+		var inner_depth3: float = depth_w - inset
+		if inner_depth3 <= 0.001:
+			continue
+
+		var back_c3: Vector3 = Vector3(left_x - depth_w - 0.5 * pen_thickness, 0.0, (ext_a3 + ext_b3) * 0.5)
+		_make_wall(container, back_c3, pen_thickness, max(0.0, ext_b3 - ext_a3), pen_height, "PenLeft_Back")
+
+		var wing_x_center3: float = left_x - (depth_w + inset) * 0.5
+		_make_wall(container, Vector3(wing_x_center3, 0.0, ext_a3), inner_depth3, pen_thickness, pen_height, "PenLeft_WingT")
+		_make_wall(container, Vector3(wing_x_center3, 0.0, ext_b3), inner_depth3, pen_thickness, pen_height, "PenLeft_WingB")
+
+	# right
+	for o4 in openings["right"]:
+		var v4: Vector2 = o4
+		var ext_a4: float = max(top_z,    v4.x - float(wing_cells) * _step)
+		var ext_b4: float = min(bottom_z, v4.y + float(wing_cells) * _step)
+		var inner_depth4: float = depth_w - inset
+		if inner_depth4 <= 0.001:
+			continue
+
+		var back_c4: Vector3 = Vector3(right_x + depth_w + 0.5 * pen_thickness, 0.0, (ext_a4 + ext_b4) * 0.5)
+		_make_wall(container, back_c4, pen_thickness, max(0.0, ext_b4 - ext_a4), pen_height, "PenRight_Back")
+
+		var wing_x_center4: float = right_x + (depth_w + inset) * 0.5
+		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_a4), inner_depth4, pen_thickness, pen_height, "PenRight_WingT")
+		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_b4), inner_depth4, pen_thickness, pen_height, "PenRight_WingB")
+
+# StaticBody3D + BoxShape3D (+ optional BoxMesh)
+func _make_wall(parent: Node3D, center_on_ground: Vector3, size_x: float, size_z: float, height: float, name: String) -> void:
+	if size_x <= 0.0001 or size_z <= 0.0001 or height <= 0.0001:
+		return
+
+	var sb := StaticBody3D.new()
+	sb.name = name
+	parent.add_child(sb)
+
+	sb.collision_layer = wall_collision_layer
+	sb.collision_mask  = wall_collision_mask
+	sb.global_position = center_on_ground + Vector3(0.0, height * 0.5, 0.0)
+
+	var cs := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(size_x, height, size_z)
+	cs.shape = box
+	sb.add_child(cs)
+
+	if render_debug_wall_mesh:
+		var mi := MeshInstance3D.new()
+		var bm := BoxMesh.new()
+		bm.size = Vector3(size_x, height, size_z)
+		mi.mesh = bm
+		sb.add_child(mi)

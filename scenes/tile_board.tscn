@@ -6,16 +6,18 @@
 [ext_resource type="PackedScene" uid="uid://bnpwkqho7ndgk" path="res://scenes/goal.tscn" id="4_ijtfa"]
 [ext_resource type="PackedScene" uid="uid://dmvugjewscsdl" path="res://scenes/placement_menu.tscn" id="5_jdbot"]
 
-[node name="TileBoard" type="Node3D" node_paths=PackedStringArray("goal_node", "spawner_node", "placement_menu", "enemy_spawner")]
+[node name="TileBoard" type="Node3D" node_paths=PackedStringArray("goal_node", "spawner_node", "placement_menu")]
 script = ExtResource("1_58eyr")
 tile_scene = ExtResource("2_jdbot")
 goal_node = NodePath("Goal")
 spawner_node = NodePath("EnemySpawner")
 placement_menu = NodePath("PlacementMenu")
-enemy_spawner = NodePath("EnemySpawner")
 
 [node name="EnemySpawner" parent="." instance=ExtResource("3_2x8nh")]
 tile_board_path = NodePath("..")
+
+[node name="MeshInstance3D" parent="EnemySpawner" index="0"]
+visible = false
 
 [node name="Goal" parent="." instance=ExtResource("4_ijtfa")]
 
