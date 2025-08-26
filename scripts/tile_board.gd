@@ -23,8 +23,8 @@ extends Node3D
 @export var wall_height: float = 2.5
 
 # Show debug meshes for BOTH boundary walls & pens (hot-toggle rebuild)
-var _debug_mesh_enabled := true
-@export var render_debug_wall_mesh := true:
+var _debug_mesh_enabled := false
+@export var render_debug_wall_mesh := false:
 	set(value):
 		_debug_mesh_enabled = value
 		if is_inside_tree() and use_bounds:
@@ -47,6 +47,11 @@ var _debug_mesh_enabled := true
 
 # Flow
 @export var goal_points_outward: bool = true
+
+# ---- NEW: Off-board spawner anchoring ----
+@export var anchor_spawner_offboard: bool = true
+@export var offboard_distance_tiles: float = 1.0        # one tile outward
+@export var make_spawner_anchor_markers: bool = false   # tiny squares to see anchors
 
 # Groups / polling
 const ENEMY_GROUP: String = "enemy"
@@ -90,8 +95,12 @@ func _ready() -> void:
 	_grid_origin = origin_tile.global_position
 	_step = tile_size
 
+	# Put portals on edges first (default: spawner left, goal right)
 	position_portal(goal_node, "right")
 	position_portal(spawner_node, "left")
+
+	# ---- NEW: move spawner off-board on a 3-wide strip that matches its span
+	_place_spawner_offboard_strip()
 
 	if use_bounds:
 		_create_bounds()
@@ -109,7 +118,7 @@ func _physics_process(delta: float) -> void:
 			_poll_accum = 0.0
 			_poll_pending_builds()
 
-# Manual helper (change sizes/toggles at runtime)
+# Manual helper
 func rebuild_bounds() -> void:
 	if use_bounds:
 		_create_bounds()
@@ -390,13 +399,48 @@ func spawn_pen_cells(span: int = -1) -> Array[Vector2i]:
 		cells.append(world_to_cell(pw))
 	return cells
 
-# NEW: check if a cell is inside the spawner opening span
 func _is_in_spawn_opening(cell: Vector2i, span: int = -1) -> bool:
 	var cells := spawn_pen_cells(span)
 	for c in cells:
 		if c == cell:
 			return true
 	return false
+
+# =============================================================================
+# NEW: Off-board spawner anchoring
+# =============================================================================
+func _place_spawner_offboard_strip() -> void:
+	if not anchor_spawner_offboard or spawner_node == null:
+		return
+
+	# Compute the edge lane centers and forward direction (relative to current spawner side)
+	var info: Dictionary = get_spawn_pen(spawner_span)
+	var exits: Array = info.get("entry_targets", [])
+	var fwd: Vector3 = info.get("forward", Vector3.FORWARD)
+	if exits.is_empty():
+		return
+
+	var dist := _step * maxf(0.0, offboard_distance_tiles)
+	var mid := int(exits.size() / 2)
+
+	# Move spawner to the middle off-board anchor
+	spawner_node.global_position = (exits[mid] as Vector3) - fwd * dist
+
+	# Optional tiny markers to visualize the 3 anchor tiles (for testing)
+	var old := get_node_or_null("SpawnerAnchors")
+	if old: old.queue_free()
+	if make_spawner_anchor_markers:
+		var group := Node3D.new()
+		group.name = "SpawnerAnchors"
+		add_child(group)
+		for e in exits:
+			var pos: Vector3 = (e as Vector3) - fwd * dist
+			var mi := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(_step * 0.96, 0.05, _step * 0.96)
+			mi.mesh = bm
+			mi.global_position = pos + Vector3(0.0, 0.03, 0.0)
+			group.add_child(mi)
 
 # =============================================================================
 # Flow-field + reservations
@@ -857,66 +901,55 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 	var wing_cells: int = int(max(0, pen_wing_cells))
 	var inset: float = clampf(pen_entry_inset, 0.0, depth_w)   # cannot exceed depth
 
-	# top
+	# (same as your previous pen-building code; unchanged)
+	# -- TOP
 	for o in openings["top"]:
 		var v: Vector2 = o
 		var ext_a: float = max(left_x,  v.x - float(wing_cells) * _step)
 		var ext_b: float = min(right_x, v.y + float(wing_cells) * _step)
 		var inner_depth: float = depth_w - inset
-		if inner_depth <= 0.001:
-			continue
-
+		if inner_depth <= 0.001: continue
 		var back_c: Vector3 = Vector3((ext_a + ext_b) * 0.5, 0.0, top_z - depth_w - 0.5 * pen_thickness)
 		_make_wall(container, back_c, max(0.0, ext_b - ext_a), pen_thickness, pen_height, "PenTop_Back")
-
 		var wing_z_center: float = top_z - (depth_w + inset) * 0.5
 		_make_wall(container, Vector3(ext_a, 0.0, wing_z_center), pen_thickness, inner_depth, pen_height, "PenTop_WingL")
 		_make_wall(container, Vector3(ext_b, 0.0, wing_z_center), pen_thickness, inner_depth, pen_height, "PenTop_WingR")
 
-	# bottom
+	# -- BOTTOM
 	for o2 in openings["bottom"]:
 		var v2: Vector2 = o2
 		var ext_a2: float = max(left_x,  v2.x - float(wing_cells) * _step)
 		var ext_b2: float = min(right_x, v2.y + float(wing_cells) * _step)
 		var inner_depth2: float = depth_w - inset
-		if inner_depth2 <= 0.001:
-			continue
-
+		if inner_depth2 <= 0.001: continue
 		var back_c2: Vector3 = Vector3((ext_a2 + ext_b2) * 0.5, 0.0, bottom_z + depth_w + 0.5 * pen_thickness)
 		_make_wall(container, back_c2, max(0.0, ext_b2 - ext_a2), pen_thickness, pen_height, "PenBottom_Back")
-
 		var wing_z_center2: float = bottom_z + (depth_w + inset) * 0.5
 		_make_wall(container, Vector3(ext_a2, 0.0, wing_z_center2), pen_thickness, inner_depth2, pen_height, "PenBottom_WingL")
 		_make_wall(container, Vector3(ext_b2, 0.0, wing_z_center2), pen_thickness, inner_depth2, pen_height, "PenBottom_WingR")
 
-	# left
+	# -- LEFT
 	for o3 in openings["left"]:
 		var v3: Vector2 = o3
 		var ext_a3: float = max(top_z,    v3.x - float(wing_cells) * _step)
 		var ext_b3: float = min(bottom_z, v3.y + float(wing_cells) * _step)
 		var inner_depth3: float = depth_w - inset
-		if inner_depth3 <= 0.001:
-			continue
-
+		if inner_depth3 <= 0.001: continue
 		var back_c3: Vector3 = Vector3(left_x - depth_w - 0.5 * pen_thickness, 0.0, (ext_a3 + ext_b3) * 0.5)
 		_make_wall(container, back_c3, pen_thickness, max(0.0, ext_b3 - ext_a3), pen_height, "PenLeft_Back")
-
 		var wing_x_center3: float = left_x - (depth_w + inset) * 0.5
 		_make_wall(container, Vector3(wing_x_center3, 0.0, ext_a3), inner_depth3, pen_thickness, pen_height, "PenLeft_WingT")
 		_make_wall(container, Vector3(wing_x_center3, 0.0, ext_b3), inner_depth3, pen_thickness, pen_height, "PenLeft_WingB")
 
-	# right
+	# -- RIGHT
 	for o4 in openings["right"]:
 		var v4: Vector2 = o4
 		var ext_a4: float = max(top_z,    v4.x - float(wing_cells) * _step)
 		var ext_b4: float = min(bottom_z, v4.y + float(wing_cells) * _step)
 		var inner_depth4: float = depth_w - inset
-		if inner_depth4 <= 0.001:
-			continue
-
+		if inner_depth4 <= 0.001: continue
 		var back_c4: Vector3 = Vector3(right_x + depth_w + 0.5 * pen_thickness, 0.0, (ext_a4 + ext_b4) * 0.5)
 		_make_wall(container, back_c4, pen_thickness, max(0.0, ext_b4 - ext_a4), pen_height, "PenRight_Back")
-
 		var wing_x_center4: float = right_x + (depth_w + inset) * 0.5
 		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_a4), inner_depth4, pen_thickness, pen_height, "PenRight_WingT")
 		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_b4), inner_depth4, pen_thickness, pen_height, "PenRight_WingB")
@@ -925,21 +958,17 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 func _make_wall(parent: Node3D, center_on_ground: Vector3, size_x: float, size_z: float, height: float, name: String) -> void:
 	if size_x <= 0.0001 or size_z <= 0.0001 or height <= 0.0001:
 		return
-
 	var sb := StaticBody3D.new()
 	sb.name = name
 	parent.add_child(sb)
-
 	sb.collision_layer = wall_collision_layer
 	sb.collision_mask  = wall_collision_mask
 	sb.global_position = center_on_ground + Vector3(0.0, height * 0.5, 0.0)
-
 	var cs := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(size_x, height, size_z)
 	cs.shape = box
 	sb.add_child(cs)
-
 	if render_debug_wall_mesh:
 		var mi := MeshInstance3D.new()
 		var bm := BoxMesh.new()

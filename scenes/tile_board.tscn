@@ -16,9 +16,6 @@ placement_menu = NodePath("PlacementMenu")
 [node name="EnemySpawner" parent="." instance=ExtResource("3_2x8nh")]
 tile_board_path = NodePath("..")
 
-[node name="MeshInstance3D" parent="EnemySpawner" index="0"]
-visible = false
-
 [node name="Goal" parent="." instance=ExtResource("4_ijtfa")]
 
 [node name="PlacementMenu" parent="." instance=ExtResource("5_jdbot")]
