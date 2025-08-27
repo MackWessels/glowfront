@@ -1,23 +1,22 @@
 extends Node3D
 
-# ---------- Visuals / feel ----------
+# Visuals / feel
 @export var projectile_scene: PackedScene
 @export var tracer_speed: float = 120.0
 @export var max_range: float = 40.0
 
-# ---------- Combat base ----------
-@export var base_damage: int = 1            # fallback only; overridden by PowerUps
-@export var base_fire_rate: float = 1.0     # seconds between shots before upgrades
+# Combat base
+@export var base_damage: int = 1
+@export var base_fire_rate: float = 1.0
 
-# ---------- Fire-rate upgrades (multiplicative; lower = faster) ----------
-@export var rate_mult_per_level: float = 0.90   # 10% faster each level
+# Fire-rate upgrades
+@export var rate_mult_per_level: float = 0.90
 @export var rate_cost_base: int = 12
 @export var rate_cost_scale: float = 1.35
 @export var rate_level_max: int = 10
 var rate_level: int = 0
 
-# ---------- RANGE (target acquisition) upgrades ----------
-# base_acquire_range = 0 to auto-read from DetectionArea shape on _ready().
+# Range (target acquisition)
 @export var base_acquire_range: float = 0.0
 @export var range_per_level: float = 2.0
 @export var range_cost_base: int = 10
@@ -25,7 +24,7 @@ var rate_level: int = 0
 @export var range_level_max: int = 10
 var range_level: int = 0
 
-# ---------- Build / Minerals ----------
+# Build / Minerals
 @export var build_cost: int = 10
 @export var minerals_path: NodePath
 var _minerals: Node = null
@@ -33,20 +32,19 @@ signal build_paid(cost: int)
 signal build_denied(cost: int)
 signal upgraded(kind: String, new_level: int, cost: int)
 
-# ---------- Targeting ----------
+# Targeting
 @onready var DetectionArea: Area3D   = $DetectionArea
 @onready var Turret: Node3D          = $tower_model/Turret
 @onready var MuzzlePoint: Node3D     = $tower_model/Turret/Barrel/MuzzlePoint
-
 var can_fire: bool = true
 var target: Node3D = null
 var targets_in_range: Array[Node3D] = []
 
-# ---------- FX ----------
+# FX
 var _anim: AnimationPlayer = null
 var _muzzle_particles: Node = null
 
-# ---------- Derived stats ----------
+# Derived stats
 var _current_damage: int = 1
 var _current_fire_rate: float = 1.0
 var _current_acquire_range: float = 12.0
@@ -54,9 +52,6 @@ const _FIRE_RATE_MIN: float = 0.05
 
 var _range_shapes: Array[CollisionShape3D] = []
 
-# -------------------------------------------------
-# Lifecycle
-# -------------------------------------------------
 func _ready() -> void:
 	_resolve_minerals()
 	if not _attempt_build_payment():
@@ -65,11 +60,9 @@ func _ready() -> void:
 		return
 	emit_signal("build_paid", build_cost)
 
-	# Signals for detection
 	DetectionArea.body_entered.connect(_on_body_entered)
 	DetectionArea.body_exited.connect(_on_body_exited)
 
-	# FX handles
 	_anim = get_node_or_null("tower_model/AnimationPlayer") as AnimationPlayer
 	if _anim == null:
 		_anim = get_node_or_null("AnimationPlayer") as AnimationPlayer
@@ -79,14 +72,15 @@ func _ready() -> void:
 	if _muzzle_particles == null:
 		_muzzle_particles = MuzzlePoint.get_node_or_null("CPUParticles3D")
 
-	# Range shapes
 	_gather_range_shapes()
 	if base_acquire_range <= 0.0:
 		var detected := _detect_initial_range()
-		base_acquire_range = detected if detected > 0.0 else 12.0
+		if detected > 0.0:
+			base_acquire_range = detected
+		else:
+			base_acquire_range = 12.0
 
-	# React to global power-up changes
-	if PowerUps.has_signal("changed"):
+	if PowerUps != null and PowerUps.has_signal("changed"):
 		PowerUps.changed.connect(func(): _recompute_stats())
 
 	_recompute_stats()
@@ -143,18 +137,14 @@ func _get_balance() -> int:
 			return int(v)
 	return 0
 
-# -------------------------------------------------
 # Upgrades
-# -------------------------------------------------
-# Damage is GLOBAL via PowerUps. These helpers delegate to it so existing calls still work.
 func get_damage_upgrade_cost() -> int:
 	return PowerUps.upgrade_cost("turret_damage")
 
 func upgrade_damage() -> bool:
 	if PowerUps.purchase("turret_damage"):
-		# Recompute to pull the new global value
 		_recompute_stats()
-		emit_signal("upgraded", "damage", 0, 0)  # level/cost are global; placeholders
+		emit_signal("upgraded", "damage", 0, 0)
 		return true
 	return false
 
@@ -195,54 +185,48 @@ func _scaled_cost(base_cost: int, scale: float, level: int) -> int:
 	return int(round(max(1.0, c)))
 
 func _recompute_stats() -> void:
-	# Flat, global damage
-	_current_damage = PowerUps.turret_damage_value() if PowerUps else base_damage
-
-	# Fire rate from local upgrades
+	if PowerUps != null:
+		_current_damage = PowerUps.turret_damage_value()
+	else:
+		_current_damage = base_damage
 	var mult := pow(max(0.01, rate_mult_per_level), rate_level)
 	_current_fire_rate = clamp(base_fire_rate * mult, _FIRE_RATE_MIN, 999.0)
-
-	# Acquisition range from local upgrades
-	var base_r := base_acquire_range if base_acquire_range > 0.0 else 12.0
+	var base_r := base_acquire_range
+	if base_r <= 0.0:
+		base_r = 12.0
 	_current_acquire_range = max(0.5, base_r + range_per_level * float(range_level))
 	_apply_range_to_area(_current_acquire_range)
 
-# -------------------------------------------------
-# Targeting + Firing
-# -------------------------------------------------
+# Targeting + firing
 func _on_body_entered(body: Node) -> void:
-	if body.is_in_group("enemies"):
+	if body.is_in_group("enemy"):
 		targets_in_range.append(body as Node3D)
 
 func _on_body_exited(body: Node) -> void:
-	if body.is_in_group("enemies"):
+	if body.is_in_group("enemy"):
 		targets_in_range.erase(body)
 		if body == target:
 			_disconnect_target_signals()
 			target = null
 
 func _process(_delta: float) -> void:
-	# prune invalids
 	var keep: Array[Node3D] = []
 	for e in targets_in_range:
 		if is_instance_valid(e):
 			keep.append(e)
 	targets_in_range = keep
 
-	# select target
 	if target == null or not is_instance_valid(target) or not targets_in_range.has(target):
 		_disconnect_target_signals()
 		target = _select_target()
 		if target != null:
 			_connect_target_signals(target)
 
-	# aim + fire
 	if target != null and is_instance_valid(target):
 		var turret_pos: Vector3 = Turret.global_position
 		var target_pos: Vector3 = target.global_position
 		target_pos.y = turret_pos.y
 		Turret.look_at(target_pos, Vector3.UP)
-
 		if can_fire:
 			fire()
 
@@ -269,26 +253,22 @@ func fire() -> void:
 	var victim := target
 	var from: Vector3 = MuzzlePoint.global_position
 	var end_pos: Vector3 = victim.global_position
-	# Clamp tracer length, not used for targeting
+
 	var to_vec := end_pos - from
 	var dist := to_vec.length()
 	if dist > max_range and dist > 0.0001:
 		end_pos = from + to_vec.normalized() * max_range
 
-	# apply damage directly to locked target
 	var ctx := _build_damage_context()
 	_apply_damage(victim, ctx)
 
-	# visuals
 	_spawn_tracer(from, end_pos)
 	_play_shoot_fx()
 
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
 
-# -------------------------------------------------
 # Damage
-# -------------------------------------------------
 func _build_damage_context() -> Dictionary:
 	return {
 		"source": "turret",
@@ -305,14 +285,8 @@ func _apply_damage(enemy: Node, ctx: Dictionary) -> void:
 		return
 	if enemy.has_method("take_damage"):
 		enemy.call("take_damage", ctx)
-	elif enemy.has_method("apply_damage"):
-		enemy.call("apply_damage", ctx)
-	elif enemy.has_method("hit"):
-		enemy.call("hit", ctx)
 
-# -------------------------------------------------
 # Range helpers
-# -------------------------------------------------
 func _gather_range_shapes() -> void:
 	_range_shapes.clear()
 	_collect_shapes_recursive(DetectionArea)
@@ -356,9 +330,7 @@ func _apply_range_to_area(r: float) -> void:
 			b.size = Vector3(r * 2.0, sz.y, r * 2.0)
 		cs.shape = s
 
-# -------------------------------------------------
 # FX
-# -------------------------------------------------
 func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
 	if projectile_scene == null:
 		return
@@ -374,10 +346,10 @@ func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
 		var s := tracer.scale
 		tracer.look_at(end_pos, Vector3.UP)
 		tracer.scale = s
-		var dist: float = start_pos.distance_to(end_pos)
+		var dist2: float = start_pos.distance_to(end_pos)
 		var dur: float = 0.05
 		if tracer_speed > 0.0:
-			dur = max(dist / tracer_speed, 0.05)
+			dur = max(dist2 / tracer_speed, 0.05)
 		var tw := get_tree().create_tween()
 		tw.tween_property(tracer, "global_position", end_pos, dur)
 		tw.tween_callback(tracer.queue_free)
@@ -401,9 +373,7 @@ func _play_shoot_fx() -> void:
 		_anim.stop()
 		_anim.play(clip)
 
-# -------------------------------------------------
 # Target death
-# -------------------------------------------------
 func _connect_target_signals(t: Node) -> void:
 	if t == null:
 		return

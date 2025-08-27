@@ -23,8 +23,8 @@ extends Node3D
 @export var wall_height: float = 2.5
 
 # Show debug meshes for BOTH boundary walls & pens (hot-toggle rebuild)
-var _debug_mesh_enabled := false
-@export var render_debug_wall_mesh := false:
+var _debug_mesh_enabled := true
+@export var render_debug_wall_mesh := true:
 	set(value):
 		_debug_mesh_enabled = value
 		if is_inside_tree() and use_bounds:
@@ -39,7 +39,7 @@ var _debug_mesh_enabled := false
 # Pens
 @export var build_spawn_pen: bool = true
 @export var build_goal_pen: bool = true
-@export var pen_depth_cells: int = 1
+@export var pen_depth_cells: int = 2
 @export var pen_wing_cells: int = 0
 @export var pen_thickness: float = 0.35
 @export var pen_height: float = 2.5
@@ -48,10 +48,10 @@ var _debug_mesh_enabled := false
 # Flow
 @export var goal_points_outward: bool = true
 
-# ---- NEW: Off-board spawner anchoring ----
+# Off-board spawner anchoring
 @export var anchor_spawner_offboard: bool = true
-@export var offboard_distance_tiles: float = 1.0        # one tile outward
-@export var make_spawner_anchor_markers: bool = false   # tiny squares to see anchors
+@export var offboard_distance_tiles: float = 1.0
+@export var make_spawner_anchor_markers: bool = false
 
 # Groups / polling
 const ENEMY_GROUP: String = "enemy"
@@ -79,6 +79,9 @@ var _grid_origin: Vector3 = Vector3.ZERO
 var _step: float = 1.0
 var _poll_accum: float = 0.0
 
+# Path change version: increments whenever the path actually changes
+var path_version: int = 0
+
 const ORTHO_DIRS: Array[Vector2i] = [
 	Vector2i(1, 0), Vector2i(-1, 0),
 	Vector2i(0, 1), Vector2i(0, -1)
@@ -89,6 +92,7 @@ const EPS := 0.0001
 # Lifecycle
 # =============================================================================
 func _ready() -> void:
+	add_to_group("TileBoard")
 	generate_board()
 
 	var origin_tile := tiles.get(Vector2i(0, 0), null) as Node3D
@@ -99,13 +103,14 @@ func _ready() -> void:
 	position_portal(goal_node, "right")
 	position_portal(spawner_node, "left")
 
-	# ---- NEW: move spawner off-board on a 3-wide strip that matches its span
+	# Move spawner off-board on a strip that matches its span
 	_place_spawner_offboard_strip()
 
 	if use_bounds:
 		_create_bounds()
 
 	_recompute_flow()
+	_emit_path_changed()  # initial broadcast
 
 	if placement_menu and not placement_menu.is_connected("place_selected", Callable(self, "_on_place_selected")):
 		placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
@@ -407,13 +412,12 @@ func _is_in_spawn_opening(cell: Vector2i, span: int = -1) -> bool:
 	return false
 
 # =============================================================================
-# NEW: Off-board spawner anchoring
+# Off-board spawner anchoring
 # =============================================================================
 func _place_spawner_offboard_strip() -> void:
 	if not anchor_spawner_offboard or spawner_node == null:
 		return
 
-	# Compute the edge lane centers and forward direction (relative to current spawner side)
 	var info: Dictionary = get_spawn_pen(spawner_span)
 	var exits: Array = info.get("entry_targets", [])
 	var fwd: Vector3 = info.get("forward", Vector3.FORWARD)
@@ -422,11 +426,8 @@ func _place_spawner_offboard_strip() -> void:
 
 	var dist := _step * maxf(0.0, offboard_distance_tiles)
 	var mid := int(exits.size() / 2)
-
-	# Move spawner to the middle off-board anchor
 	spawner_node.global_position = (exits[mid] as Vector3) - fwd * dist
 
-	# Optional tiny markers to visualize the 3 anchor tiles (for testing)
 	var old := get_node_or_null("SpawnerAnchors")
 	if old: old.queue_free()
 	if make_spawner_anchor_markers:
@@ -585,7 +586,7 @@ func next_cell_from(c: Vector2i) -> Vector2i:
 	else:
 		return Vector2i(c.x, clampi(c.y + dz, 0, board_size_z - 1))
 
-# Optional smooth sampler (kept for other agents)
+# Optional smooth sampler
 func sample_flow_dir_smooth(world_pos: Vector3) -> Vector3:
 	var fx := (world_pos.x - _grid_origin.x) / _step
 	var fz := (world_pos.z - _grid_origin.z) / _step
@@ -686,7 +687,7 @@ func _commit_pending_item(index: int) -> void:
 			if not paid and tile and tile.has_method("break_tile"):
 				tile.call("break_tile")
 
-	emit_signal("global_path_changed")
+	_emit_path_changed()
 	_pending_builds.remove_at(index)
 
 # =============================================================================
@@ -710,7 +711,7 @@ func _on_place_selected(action: String) -> void:
 		if _is_in_spawn_opening(pos, spawner_span):
 			if active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
-			emit_signal("global_path_changed")
+			_emit_path_changed()
 			_clear_pending()
 			return
 
@@ -722,7 +723,7 @@ func _on_place_selected(action: String) -> void:
 		if not ok_path:
 			if active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
-			emit_signal("global_path_changed")
+			_emit_path_changed()
 			_clear_pending()
 			return
 
@@ -733,7 +734,7 @@ func _on_place_selected(action: String) -> void:
 			_reserve_cell(pos, true)
 			_recompute_flow()
 			_queue_pending_build(pos, active_tile, action, action_cost)
-			emit_signal("global_path_changed")
+			_emit_path_changed()
 			return
 
 		# 3) Clear -> build now
@@ -747,7 +748,7 @@ func _on_place_selected(action: String) -> void:
 			if active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
 			_recompute_flow()
-			emit_signal("global_path_changed")
+			_emit_path_changed()
 			_clear_pending()
 			return
 
@@ -757,7 +758,7 @@ func _on_place_selected(action: String) -> void:
 			if not paid and active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
 
-		emit_signal("global_path_changed")
+		_emit_path_changed()
 		_clear_pending()
 		return
 
@@ -767,7 +768,7 @@ func _on_place_selected(action: String) -> void:
 	if active_tile.has_method("apply_placement"):
 		active_tile.call("apply_placement", action)
 	_recompute_flow()
-	emit_signal("global_path_changed")
+	_emit_path_changed()
 	_clear_pending()
 
 # =============================================================================
@@ -899,9 +900,8 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 
 	var depth_w: float = float(max(0, pen_depth_cells)) * _step
 	var wing_cells: int = int(max(0, pen_wing_cells))
-	var inset: float = clampf(pen_entry_inset, 0.0, depth_w)   # cannot exceed depth
+	var inset: float = clampf(pen_entry_inset, 0.0, depth_w)
 
-	# (same as your previous pen-building code; unchanged)
 	# -- TOP
 	for o in openings["top"]:
 		var v: Vector2 = o
@@ -975,3 +975,10 @@ func _make_wall(parent: Node3D, center_on_ground: Vector3, size_x: float, size_z
 		bm.size = Vector3(size_x, height, size_z)
 		mi.mesh = bm
 		sb.add_child(mi)
+
+# =============================================================================
+# Path change helper
+# =============================================================================
+func _emit_path_changed() -> void:
+	path_version += 1
+	emit_signal("global_path_changed")

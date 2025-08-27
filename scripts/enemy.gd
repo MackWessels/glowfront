@@ -1,7 +1,7 @@
 extends CharacterBody3D
 class_name Enemy
 
-# Movement
+# -------- Movement (unchanged) --------
 @export var speed: float = 2.0
 @export var accel: float = 22.0
 @export var turn_speed_deg: float = 540.0
@@ -17,10 +17,23 @@ class_name Enemy
 @export var tile_board_path: NodePath
 @export var goal_node_path: NodePath
 
-# Optional stats from spawner
+# Stats injected by spawner
 @export var health: int = 10
 @export var attack: int = 1
 @export var mass: float = 1.0
+
+# Rewards/flags from spawner (fixed by color; not wave-scaled)
+@export var mineral_reward: int = 1
+@export var is_elite: bool = false
+
+# Visual level (1=green, 2=blue, 3=red, 4=black)
+var _level: int = 1
+@export var level: int = 1:
+	set(value):
+		_level = clampi(value, 1, 4)
+		_apply_level_skin()
+	get:
+		return _level
 
 signal died
 
@@ -31,25 +44,36 @@ var _y_plane: float = 0.0
 
 var _cur_cell: Vector2i = Vector2i(-9999, -9999)
 var _planned_next: Vector2i = Vector2i(-9999, -9999)
-var _planned_next_is_offgrid := false
+var _planned_next_is_offgrid: bool = false
 var _tile_target: Vector3 = Vector3.ZERO
 var _seg_tan: Vector3 = Vector3.FORWARD
 var _seg_perp: Vector3 = Vector3.RIGHT
 
-# Lane state (continuous)
 var _lane_state: float = 0.0
 var _lane_target: float = 0.0
-var _lane_initialized := false
+var _lane_initialized: bool = false
 var _lane_max_off_cached: float = 0.0
 var _lane_sig: float = 0.0
-var _lane_sig_ready := false
+var _lane_sig_ready: bool = false
 
-var _needs_replan := false
+var _needs_replan: bool = false
 
 # Entry glide
-var _entry_active := false
+var _entry_active: bool = false
 var _entry_target: Vector3 = Vector3.ZERO
 @export var _entry_radius: float = 0.4
+
+# Optional seed from spawner for first-lane offset
+var _lane_signature: float = 9999.0
+
+# Visual handle
+@onready var _ufo_base: MeshInstance3D = get_node_or_null("UFO/Base") as MeshInstance3D
+var _base_original_override: Material = null
+
+var _dead: bool = false
+
+# Track board path version (if board exposes one)
+var _last_path_version: int = -1
 
 func _ready() -> void:
 	add_to_group("enemy")
@@ -69,12 +93,20 @@ func _ready() -> void:
 	_y_plane = global_position.y
 	_lane_initialized = false
 
+	# react to global path rebakes
 	if _board and _board.has_signal("global_path_changed"):
 		_board.connect("global_path_changed", Callable(self, "_on_board_changed"))
+
+	# init path version if board exposes it
+	_last_path_version = _get_board_path_version()
 
 	velocity = Vector3.ZERO
 	_cur_cell = _board_cell_of_pos(global_position)
 	_plan_from_cell(_cur_cell)
+
+	if _ufo_base != null:
+		_base_original_override = _ufo_base.material_override
+	_apply_level_skin()
 
 func reset_for_spawn() -> void:
 	velocity = Vector3.ZERO
@@ -83,6 +115,8 @@ func reset_for_spawn() -> void:
 	_cur_cell = _board_cell_of_pos(global_position)
 	_plan_from_cell(_cur_cell)
 	_entry_active = false
+	_dead = false
+	_apply_level_skin()
 
 func set_entry_target(p: Vector3, radius: float) -> void:
 	_entry_target = p
@@ -95,7 +129,65 @@ func apply_stats(s: Dictionary) -> void:
 	if s.has("speed"):  speed  = float(s["speed"])
 	if s.has("mass"):   mass   = float(s["mass"])
 
-# ---- helpers ----
+# ---------------- Combat ----------------
+func take_damage(ctx: Dictionary) -> void:
+	var base: int = int(ctx.get("base", 0))
+	var flat: int = int(ctx.get("flat_bonus", 0))
+	var mult: float = float(ctx.get("mult", 1.0))
+	var crit_mult: float = float(ctx.get("crit_mult", 2.0))
+	var crit_chance: float = float(ctx.get("crit_chance", 0.0))
+	if crit_chance > 0.0 and randf() < crit_chance:
+		mult *= crit_mult
+	var dmg: int = int(max(0.0, round(float(base + flat) * mult)))
+	if dmg <= 0:
+		return
+	health -= dmg
+	if health <= 0:
+		_die(true)
+
+func _die(killed: bool) -> void:
+	if _dead:
+		return
+	_dead = true
+
+	if killed:
+		_award_minerals(mineral_reward)
+		var shards: Node = get_node_or_null("/root/Shards")
+		if shards != null:
+			if shards.has_method("award_for_enemy"):
+				shards.call("award_for_enemy", is_elite)
+			elif shards.has_method("add"):
+				if is_elite: shards.call("add", 5)
+				elif randf() < 0.03: shards.call("add", 1)
+
+	emit_signal("died")
+	queue_free()
+
+func _award_minerals(amount: int) -> void:
+	if amount <= 0: return
+	if typeof(Economy) != TYPE_NIL:
+		if Economy.has_method("earn"): Economy.earn(amount); return
+		if Economy.has_method("add"): Economy.add(amount); return
+		if Economy.has_method("deposit"): Economy.deposit(amount); return
+		if Economy.has_method("set_amount") and Economy.has_method("balance"):
+			Economy.set_amount(int(Economy.balance()) + amount); return
+		var bv: Variant = Economy.get("minerals")
+		if typeof(bv) == TYPE_INT:
+			Economy.set("minerals", int(bv) + amount); return
+	var econ: Node = get_node_or_null("/root/Minerals")
+	if econ != null:
+		if econ.has_method("earn"): econ.call("earn", amount); return
+		if econ.has_method("add"): econ.call("add", amount); return
+		if econ.has_method("set_amount"):
+			var cur: int = 0
+			var v: Variant = econ.get("minerals")
+			if typeof(v) == TYPE_INT: cur = int(v)
+			econ.call("set_amount", cur + amount); return
+		var bv2: Variant = econ.get("minerals")
+		if typeof(bv2) == TYPE_INT:
+			econ.set("minerals", int(bv2) + amount); return
+
+# ---------------- Helpers ----------------
 func _apply_y_lock(p: Vector3) -> Vector3:
 	p.y = _y_plane
 	return p
@@ -135,27 +227,35 @@ func _hash2f(c: Vector2i) -> float:
 func _max_lane_abs() -> float:
 	return minf(_tile_w * 0.45, lane_spread_tiles * _tile_w)
 
-func _lane_signature() -> float:
+func _lane_signature_value() -> float:
 	if not _lane_sig_ready:
-		_lane_sig = randf_range(-1.0, 1.0)
+		if _lane_signature >= -1.0 and _lane_signature <= 1.0:
+			_lane_sig = clampf(_lane_signature, -1.0, 1.0)
+		else:
+			_lane_sig = randf_range(-1.0, 1.0)
 		_lane_sig_ready = true
 	return _lane_sig
 
-# ---- planning ----
+func _get_board_path_version() -> int:
+	if _board == null: return -1
+	var v: Variant = _board.get("path_version")
+	return int(v) if typeof(v) in [TYPE_INT, TYPE_FLOAT] else _last_path_version
+
+# ---------------- Planning (unchanged pathing, stronger refresh) ----------------
 func _plan_from_cell(c: Vector2i) -> void:
 	var n: Vector2i = _next_from(c)
 	_planned_next = n
 	_planned_next_is_offgrid = _is_offgrid_cell(n)
 
-	var a := _cell_center(c)
-	var b := _cell_center(n)
-	var d := b - a; d.y = 0.0
-	var L := d.length()
+	var a: Vector3 = _cell_center(c)
+	var b: Vector3 = _cell_center(n)
+	var d: Vector3 = b - a; d.y = 0.0
+	var L: float = d.length()
 	_seg_tan = (d / L) if L > 0.0001 else Vector3.FORWARD
 	_seg_perp = Vector3(-_seg_tan.z, 0.0, _seg_tan.x)
 
 	_lane_max_off_cached = _max_lane_abs()
-	var desired := lane_bias_strength * _lane_signature() * _lane_max_off_cached
+	var desired: float = lane_bias_strength * _lane_signature_value() * _lane_max_off_cached
 	desired += _hash2f(c) * (lane_jitter_tiles * _tile_w)
 	desired = clampf(desired, -_lane_max_off_cached, _lane_max_off_cached)
 	_lane_target = desired
@@ -167,7 +267,7 @@ func _plan_from_cell(c: Vector2i) -> void:
 	_rebuild_tile_target()
 
 func _rebuild_tile_target() -> void:
-	var off := _maybe_quantize(_lane_state, _lane_max_off_cached)
+	var off: float = _maybe_quantize(_lane_state, _lane_max_off_cached)
 	_tile_target = _cell_center(_planned_next) + _seg_perp * off
 
 func _maybe_quantize(x: float, max_off: float) -> float:
@@ -179,17 +279,23 @@ func _maybe_quantize(x: float, max_off: float) -> float:
 	return x
 
 func _accelerate_toward(v: Vector3, target_v: Vector3, a: float, dt: float) -> Vector3:
-	var dv := target_v - v
-	var max_dv := a * dt
+	var dv: Vector3 = target_v - v
+	var max_dv: float = a * dt
 	if dv.length() > max_dv:
 		dv = dv.normalized() * max_dv
 	return v + dv
 
-# ---- physics ----
+# ---------------- Physics ----------------
 func _physics_process(delta: float) -> void:
-	# keep lane smooth
+	# If the board exposes a path_version, replan on change.
+	var pv: int = _get_board_path_version()
+	if pv != _last_path_version:
+		_last_path_version = pv
+		_lane_initialized = false
+		_needs_replan = true
+
 	if lane_slew_per_sec > 0.0 and _lane_initialized:
-		var step := lane_slew_per_sec * delta * _lane_max_off_cached
+		var step: float = lane_slew_per_sec * delta * _lane_max_off_cached
 		_lane_state = move_toward(_lane_state, _lane_target, step)
 		_rebuild_tile_target()
 
@@ -197,12 +303,16 @@ func _physics_process(delta: float) -> void:
 	if _entry_active:
 		var to_target: Vector3 = _entry_target - global_position
 		to_target.y = 0.0
-		var L := to_target.length()
+		var L: float = to_target.length()
 		if L <= _entry_radius:
 			_entry_active = false
 			velocity = Vector3.ZERO
+			# snap to current route right away to avoid using any stale plan
+			_cur_cell = _board_cell_of_pos(global_position)
+			_lane_initialized = false
+			_plan_from_cell(_cur_cell)
 		else:
-			var tv := to_target / maxf(L, 0.0001) * speed
+			var tv: Vector3 = to_target / maxf(L, 0.0001) * speed
 			velocity = _accelerate_toward(velocity, tv, accel, delta)
 			_update_facing_toward(velocity, delta)
 			velocity.y = 0.0
@@ -212,22 +322,25 @@ func _physics_process(delta: float) -> void:
 			return
 
 	if _needs_replan:
+		_needs_replan = false
+		_lane_initialized = false
 		_plan_from_cell(_cur_cell)
 
-	var live_next := _next_from(_cur_cell)
+	var live_next: Vector2i = _next_from(_cur_cell)
 	if live_next != _planned_next:
+		_lane_initialized = false
 		_plan_from_cell(_cur_cell)
 
-	var seek := _tile_target - global_position
+	var seek: Vector3 = _tile_target - global_position
 	seek.y = 0.0
-	var dist := seek.length()
+	var dist: float = seek.length()
 
 	if _planned_next_is_offgrid and dist <= maxf(_tile_w * 0.25, 0.1):
 		_on_reach_goal()
 		return
 
 	if dist > 0.01:
-		var tv_main := (seek / dist) * speed
+		var tv_main: Vector3 = (seek / dist) * speed
 		velocity = _accelerate_toward(velocity, tv_main, accel, delta)
 
 	_update_facing_toward(velocity, delta)
@@ -238,38 +351,65 @@ func _physics_process(delta: float) -> void:
 	_emit_cell_if_changed()
 
 func _emit_cell_if_changed() -> void:
-	var new_cell := _board_cell_of_pos(global_position)
+	var new_cell: Vector2i = _board_cell_of_pos(global_position)
 	if new_cell != _cur_cell:
 		_cur_cell = new_cell
 		_plan_from_cell(_cur_cell)
 
-# ---- facing ----
 func _update_facing_toward(dir_or_vec: Vector3, delta: float) -> void:
-	var v := dir_or_vec; v.y = 0.0
+	var v: Vector3 = dir_or_vec; v.y = 0.0
 	if v.length_squared() < 1e-8:
 		return
-	var desired_fwd := v.normalized()
+	var desired_fwd: Vector3 = v.normalized()
 	var current_fwd: Vector3 = -global_transform.basis.z
 	current_fwd.y = 0.0
 	if current_fwd.length_squared() <= 1e-8:
 		current_fwd = Vector3.FORWARD
-	var angle := current_fwd.signed_angle_to(desired_fwd, Vector3.UP)
-	var max_step := deg_to_rad(turn_speed_deg) * delta
+	var angle: float = current_fwd.signed_angle_to(desired_fwd, Vector3.UP)
+	var max_step: float = deg_to_rad(turn_speed_deg) * delta
 	angle = clampf(angle, -max_step, max_step)
 	rotate_y(angle)
 
-# ---- board change ----
 func _on_board_changed() -> void:
-	_needs_replan = true
+	# force immediate replan when the board says the path changed
+	_last_path_version = _get_board_path_version()
+	_lane_initialized = false
+	_cur_cell = _board_cell_of_pos(global_position)
+	_plan_from_cell(_cur_cell)
 
-# ---- goal ----
 func _on_reach_goal() -> void:
-	emit_signal("died")
-	queue_free()
+	_die(false)  # no rewards on leak
 
-# ---- misc ----
 func _get_tile_w() -> float:
 	if _board and _board.has_method("tile_world_size"):
 		return float(_board.call("tile_world_size"))
 	var tv: Variant = _board.get("tile_size") if _board else 1.0
 	return float(tv) if (typeof(tv) == TYPE_FLOAT or typeof(tv) == TYPE_INT) else 1.0
+
+# -------- Level color --------
+func _color_for_level(lvl: int) -> Color:
+	match clampi(lvl, 1, 4):
+		1: return Color(0.35, 0.90, 0.35)  # green
+		2: return Color(0.30, 0.55, 1.00)  # blue
+		3: return Color(1.00, 0.25, 0.25)  # red
+		_: return Color(0.05, 0.05, 0.05)  # black
+
+func _apply_level_skin() -> void:
+	if _ufo_base == null:
+		_ufo_base = get_node_or_null("UFO/Base") as MeshInstance3D
+		if _ufo_base != null and _base_original_override == null:
+			_base_original_override = _ufo_base.material_override
+	if _ufo_base == null:
+		return
+
+	var col: Color = _color_for_level(_level)
+	var mat: StandardMaterial3D
+	if _ufo_base.material_override is StandardMaterial3D:
+		mat = ((_ufo_base.material_override as StandardMaterial3D).duplicate() as StandardMaterial3D)
+	else:
+		mat = StandardMaterial3D.new()
+	mat.resource_local_to_scene = true
+	mat.albedo_color = col
+	mat.metallic = 0.15
+	mat.roughness = 0.35
+	_ufo_base.material_override = mat
