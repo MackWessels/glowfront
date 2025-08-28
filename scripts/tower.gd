@@ -100,7 +100,8 @@ func _resolve_minerals() -> void:
 			_minerals = root.find_child("Minerals", true, false)
 
 func _attempt_build_payment() -> bool:
-	if build_cost <= 0: return true
+	if build_cost <= 0:
+		return true
 	return _try_spend(build_cost)
 
 func _try_spend(amount: int) -> bool:
@@ -119,7 +120,8 @@ func _try_spend(amount: int) -> bool:
 		if _minerals.has("minerals"):
 			var cur2 := 0
 			var v = _minerals.get("minerals")
-			if typeof(v) == TYPE_INT: cur2 = int(v)
+			if typeof(v) == TYPE_INT:
+				cur2 = int(v)
 			_minerals.set("minerals", max(0, cur2 - amount))
 			return true
 	return false
@@ -127,33 +129,40 @@ func _try_spend(amount: int) -> bool:
 func _get_balance() -> int:
 	if _minerals and _minerals.has("minerals"):
 		var v = _minerals.get("minerals")
-		if typeof(v) == TYPE_INT: return int(v)
+		if typeof(v) == TYPE_INT:
+			return int(v)
 	return 0
 
 # =========================================================
 # Upgrades (local)
 # =========================================================
 func get_rate_upgrade_cost() -> int:
-	if rate_level >= rate_level_max: return 0
+	if rate_level >= rate_level_max:
+		return 0
 	return _scaled_cost(12, 1.35, rate_level)
 
 func get_range_upgrade_cost() -> int:
-	if range_level >= range_level_max: return 0
+	if range_level >= range_level_max:
+		return 0
 	return _scaled_cost(10, 1.30, range_level)
 
 func upgrade_fire_rate() -> bool:
-	if rate_level >= rate_level_max: return false
+	if rate_level >= rate_level_max:
+		return false
 	var cost := get_rate_upgrade_cost()
-	if not _try_spend(cost): return false
+	if not _try_spend(cost):
+		return false
 	rate_level += 1
 	_recompute_stats()
 	upgraded.emit("fire_rate", rate_level, cost)
 	return true
 
 func upgrade_range() -> bool:
-	if range_level >= range_level_max: return false
+	if range_level >= range_level_max:
+		return false
 	var cost := get_range_upgrade_cost()
-	if not _try_spend(cost): return false
+	if not _try_spend(cost):
+		return false
 	range_level += 1
 	_recompute_stats()
 	upgraded.emit("range", range_level, cost)
@@ -197,6 +206,50 @@ func _recompute_stats() -> void:
 	_apply_range_to_area(_current_acquire_range)
 
 # =========================================================
+# Multi-shot helpers
+# =========================================================
+func _compute_multishot_count() -> int:
+	# Returns how many distinct enemies to hit this shot.
+	var pct: float = 0.0
+	if PowerUps != null and PowerUps.has_method("multishot_percent_value"):
+		pct = maxf(0.0, PowerUps.multishot_percent_value())
+
+	# 100% guarantees +1 target; overflow is chance for one more, etc.
+	# e.g., 170% => base 1 + 1 guaranteed = 2, plus 70% chance for 3rd.
+	var extra_guaranteed: int = int(floor(pct / 100.0))
+	var remainder: float = pct - float(extra_guaranteed) * 100.0
+
+	var count: int = 1 + extra_guaranteed
+	if remainder > 0.0:
+		if randf() * 100.0 < remainder:
+			count += 1
+	return max(1, count)
+
+func _targets_sorted_by_distance() -> Array[Node3D]:
+	var arr: Array[Node3D] = []
+	for e in targets_in_range:
+		if e != null and is_instance_valid(e):
+			arr.append(e)
+	# Sort by distance ascending (closest first) — Godot 4 expects a single Callable
+	arr.sort_custom(Callable(self, "_cmp_by_distance"))
+	return arr
+
+func _cmp_by_distance(a: Node3D, b: Node3D) -> bool:
+	var o: Vector3 = global_transform.origin
+	var da: float = o.distance_to(a.global_transform.origin)
+	var db: float = o.distance_to(b.global_transform.origin)
+	return da < db
+
+func _select_victims_widest(count: int) -> Array[Node3D]:
+	# Pick up to `count` closest distinct enemies currently in range.
+	var sorted: Array[Node3D] = _targets_sorted_by_distance()
+	var n: int = min(count, sorted.size())
+	var victims: Array[Node3D] = []
+	for i in n:
+		victims.append(sorted[i])
+	return victims
+
+# =========================================================
 # Targeting + firing
 # =========================================================
 func _on_body_entered(body: Node) -> void:
@@ -233,12 +286,14 @@ func _process(_dt: float) -> void:
 			fire()
 
 func _select_target() -> Node3D:
-	if targets_in_range.is_empty(): return null
+	if targets_in_range.is_empty():
+		return null
 	var best: Node3D = null
 	var best_d := INF
 	var origin := global_transform.origin
 	for e in targets_in_range:
-		if e == null or not is_instance_valid(e): continue
+		if e == null or not is_instance_valid(e):
+			continue
 		var d := origin.distance_to(e.global_transform.origin)
 		if d < best_d:
 			best_d = d
@@ -246,23 +301,37 @@ func _select_target() -> Node3D:
 	return best
 
 func fire() -> void:
-	if target == null or not is_instance_valid(target): return
+	if target == null or not is_instance_valid(target):
+		return
+
 	can_fire = false
 
-	var victim := target
+	# Decide how many enemies to hit this shot; clamp to what's actually in range.
+	var want: int = _compute_multishot_count()
+	var victims: Array[Node3D] = _select_victims_widest(want)
+	if victims.is_empty():
+		can_fire = true
+		return
+
 	var from: Vector3 = MuzzlePoint.global_position
-	var end_pos: Vector3 = victim.global_position
+	var ctx: Dictionary = _build_damage_context()
 
-	var to_vec := end_pos - from
-	var dist := to_vec.length()
-	if dist > max_range and dist > 0.0001:
-		end_pos = from + to_vec.normalized() * max_range
-
-	var ctx := _build_damage_context()
-	_apply_damage(victim, ctx)
-
-	_spawn_tracer(from, end_pos)
+	# Play muzzle/animation once per shot.
 	_play_shoot_fx()
+
+	# Apply to each distinct victim; spawn one tracer per victim.
+	for v in victims:
+		if v == null or not is_instance_valid(v):
+			continue
+		var end_pos: Vector3 = v.global_position
+
+		var to_vec: Vector3 = end_pos - from
+		var dist: float = to_vec.length()
+		if dist > max_range and dist > 0.0001:
+			end_pos = from + to_vec.normalized() * max_range
+
+		_apply_damage(v, ctx)
+		_spawn_tracer(from, end_pos)
 
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
@@ -310,9 +379,12 @@ func _collect_shapes_recursive(n: Node) -> void:
 func _detect_initial_range() -> float:
 	for cs in _range_shapes:
 		var s := cs.shape
-		if s is SphereShape3D:   return (s as SphereShape3D).radius
-		if s is CylinderShape3D: return (s as CylinderShape3D).radius
-		if s is CapsuleShape3D:  return (s as CapsuleShape3D).radius
+		if s is SphereShape3D:
+			return (s as SphereShape3D).radius
+		if s is CylinderShape3D:
+			return (s as CylinderShape3D).radius
+		if s is CapsuleShape3D:
+			return (s as CapsuleShape3D).radius
 		if s is BoxShape3D:
 			var sz := (s as BoxShape3D).size
 			return max(sz.x, sz.z) * 0.5
@@ -320,7 +392,8 @@ func _detect_initial_range() -> float:
 
 func _apply_range_to_area(r: float) -> void:
 	for cs in _range_shapes:
-		if cs.shape == null: continue
+		if cs.shape == null:
+			continue
 		var s: Shape3D = cs.shape.duplicate()
 		s.resource_local_to_scene = true
 		if s is SphereShape3D:
@@ -339,9 +412,11 @@ func _apply_range_to_area(r: float) -> void:
 # FX
 # =========================================================
 func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
-	if projectile_scene == null: return
+	if projectile_scene == null:
+		return
 	var tracer := projectile_scene.instantiate() as Node3D
-	if tracer == null: return
+	if tracer == null:
+		return
 	get_tree().current_scene.add_child(tracer)
 	tracer.global_position = start_pos
 
@@ -352,7 +427,9 @@ func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
 		tracer.look_at(end_pos, Vector3.UP)
 		tracer.scale = s
 		var dist2: float = start_pos.distance_to(end_pos)
-		var dur: float = (dist2 / tracer_speed) if tracer_speed > 0.0 else 0.05
+		var dur: float = 0.05
+		if tracer_speed > 0.0:
+			dur = dist2 / tracer_speed
 		dur = max(dur, 0.05)
 		var tw := get_tree().create_tween()
 		tw.tween_property(tracer, "global_position", end_pos, dur)
@@ -381,12 +458,14 @@ func _play_shoot_fx() -> void:
 # Target death wiring
 # =========================================================
 func _connect_target_signals(t: Node) -> void:
-	if t == null: return
+	if t == null:
+		return
 	if t.has_signal("died") and not t.is_connected("died", Callable(self, "_on_target_died")):
 		t.connect("died", Callable(self, "_on_target_died"))
 
 func _disconnect_target_signals() -> void:
-	if target == null: return
+	if target == null:
+		return
 	if target.has_signal("died") and target.is_connected("died", Callable(self, "_on_target_died")):
 		target.disconnect("died", Callable(self, "_on_target_died"))
 

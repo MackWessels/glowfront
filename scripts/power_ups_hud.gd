@@ -29,7 +29,7 @@ func _ready() -> void:
 	# Tabs
 	_tabs = TabContainer.new()
 	_tabs.clip_tabs = true
-	_tabs.tab_alignment = TabBar.ALIGNMENT_LEFT 
+	_tabs.tab_alignment = TabBar.ALIGNMENT_LEFT
 	_panel.add_child(_tabs)
 
 	# Offense tab
@@ -80,7 +80,7 @@ func _on_upgrade_purchased(_id: String, _lvl: int, _next_cost: int) -> void:
 func _layout_panel() -> void:
 	# Active grid drives size
 	var active_grid := (_grid_offense if _tabs.current_tab == TAB_OFFENSE else _grid_base)
-	var active_count := int(active_grid.get_child_count())
+	var active_count: int = int(active_grid.get_child_count())
 
 	var cols: int = max(1, columns)
 	var rows: int = (active_count + cols - 1) / cols if active_count > 0 else 0
@@ -156,7 +156,7 @@ func _refresh_all() -> void:
 	_layout_panel()
 
 func _refresh_card(id: String) -> void:
-	var btn := (_cards_offense.get(id, null) as Button)
+	var btn: Button = (_cards_offense.get(id, null) as Button)
 	if btn == null:
 		btn = (_cards_base.get(id, null) as Button)
 	if btn == null:
@@ -187,10 +187,10 @@ func _refresh_card(id: String) -> void:
 
 # ---------- category / naming ----------
 func _category_for(id: String) -> int:
-	# Offense: turret_* and crit_*; Base: spawner_*
+	# Offense: turret_* and crit_*; Base: spawner_* and base_* (health, regen)
 	if id.begins_with("turret_") or id.begins_with("crit_"):
 		return TAB_OFFENSE
-	if id.begins_with("spawner_"):
+	if id.begins_with("spawner_") or id.begins_with("base_"):
 		return TAB_BASE
 	# Fallback: treat unknowns as Offense (keeps them visible)
 	return TAB_OFFENSE
@@ -198,14 +198,17 @@ func _category_for(id: String) -> int:
 func _pretty_name(id: String) -> String:
 	match id:
 		# Offense
-		"turret_damage": return "Damage"
-		"turret_rate":   return "Attack Speed"
-		"turret_range":  return "Range"
-		"crit_chance":   return "Crit Chance"
-		"crit_mult":     return "Crit Damage"
+		"turret_damage":     return "Damage"
+		"turret_rate":       return "Attack Speed"
+		"turret_range":      return "Range"
+		"crit_chance":       return "Crit Chance"
+		"crit_mult":         return "Crit Damage"
+		"turret_multishot":  return "Multi-Shot"
 		# Base
-		"spawner_health": return "Spawner Health"
-		_:                return id.capitalize()
+		"base_max_hp":       return "Max Health"
+		"base_regen":        return "Health Regen"
+		"spawner_health":    return "Spawner Health"
+		_:                   return id.capitalize()
 
 # ---------- values / formatting ----------
 func _value_line(id: String, current_level: int) -> String:
@@ -240,8 +243,44 @@ func _value_line(id: String, current_level: int) -> String:
 			var nxtm: float = PowerUps.next_crit_mult_value()
 			return "x%.2f → x%.2f" % [curm, nxtm]
 
+		"turret_multishot":
+			var cur_ms: float = 0.0
+			var nxt_ms: float = 0.0
+			if PowerUps.has_method("multishot_percent_value"):
+				cur_ms = PowerUps.multishot_percent_value()
+			if PowerUps.has_method("next_multishot_percent_value"):
+				nxt_ms = PowerUps.next_multishot_percent_value()
+
+			var cur_base: int = 1 + int(floor(cur_ms / 100.0))
+			var cur_rem: int = int(round(cur_ms - float(cur_base - 1) * 100.0))
+			if cur_rem < 0: cur_rem = 0
+
+			var nxt_base: int = 1 + int(floor(nxt_ms / 100.0))
+			var nxt_rem: int = int(round(nxt_ms - float(nxt_base - 1) * 100.0))
+			if nxt_rem < 0: nxt_rem = 0
+
+			# Example: "2 +70% → 2 +90%" (guaranteed 2 targets, 70% for a 3rd)
+			return "%d +%d%% → %d +%d%%" % [cur_base, cur_rem, nxt_base, nxt_rem]
+
+		"base_max_hp":
+			# Use PowerUps helper; works even if Health autoload isn't passed in.
+			var hinfo: Dictionary = PowerUps.health_max_info()
+			var cur_m: int = int(hinfo.get("current_max_hp", 0))
+			var nxt_m: int = int(hinfo.get("next_max_hp", 0))
+			if cur_m > 0 and nxt_m > 0:
+				return "%d → %d" % [cur_m, nxt_m]
+			return "Lv " + str(current_level)
+
+		"base_regen":
+			var rinfo2: Dictionary = PowerUps.health_regen_info()
+			var cur_rg: float = float(rinfo2.get("current_regen_per_sec", 0.0))
+			var nxt_rg: float = float(rinfo2.get("next_regen_per_sec", 0.0))
+			if cur_rg >= 0.0 and nxt_rg > 0.0:
+				return "%.2f/s → %.2f/s" % [cur_rg, nxt_rg]
+			return "Lv " + str(current_level)
+
 		"spawner_health":
-			# Will show absolute values if helpers exist; otherwise shows level.
+			# Kept for compatibility if you still use it.
 			if PowerUps.has_method("spawner_health_value") and PowerUps.has_method("next_spawner_health_value"):
 				var cur_h: int = int(PowerUps.spawner_health_value())
 				var nxt_h: int = int(PowerUps.next_spawner_health_value())
