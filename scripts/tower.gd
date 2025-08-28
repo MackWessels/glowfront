@@ -1,30 +1,26 @@
 extends Node3D
 
-# Visuals / feel
+# ---------- Visuals ----------
 @export var projectile_scene: PackedScene
-@export var tracer_speed: float = 120.0
+@export var tracer_speed: float = 12.0
 @export var max_range: float = 40.0
 
-# Combat base
-@export var base_damage: int = 1
-@export var base_fire_rate: float = 1.0
+# ---------- Base combat ----------
+@export var base_damage: int = 1                         # used if PowerUps missing
+@export var base_fire_rate: float = 1.0                  # seconds per shot (interval)
 
-# Fire-rate upgrades
+# ---------- Local fire-rate upgrades (multiplies interval) ----------
 @export var rate_mult_per_level: float = 0.90
-@export var rate_cost_base: int = 12
-@export var rate_cost_scale: float = 1.35
 @export var rate_level_max: int = 10
 var rate_level: int = 0
 
-# Range (target acquisition)
-@export var base_acquire_range: float = 0.0
+# ---------- Local range upgrades (adds units) ----------
+@export var base_acquire_range: float = 0.0              # 0 => auto-detect from shape or 12
 @export var range_per_level: float = 2.0
-@export var range_cost_base: int = 10
-@export var range_cost_scale: float = 1.30
 @export var range_level_max: int = 10
 var range_level: int = 0
 
-# Build / Minerals
+# ---------- Build / minerals ----------
 @export var build_cost: int = 10
 @export var minerals_path: NodePath
 var _minerals: Node = null
@@ -32,7 +28,7 @@ signal build_paid(cost: int)
 signal build_denied(cost: int)
 signal upgraded(kind: String, new_level: int, cost: int)
 
-# Targeting
+# ---------- Targeting ----------
 @onready var DetectionArea: Area3D   = $DetectionArea
 @onready var Turret: Node3D          = $tower_model/Turret
 @onready var MuzzlePoint: Node3D     = $tower_model/Turret/Barrel/MuzzlePoint
@@ -40,25 +36,30 @@ var can_fire: bool = true
 var target: Node3D = null
 var targets_in_range: Array[Node3D] = []
 
-# FX
+# ---------- FX ----------
 var _anim: AnimationPlayer = null
 var _muzzle_particles: Node = null
 
-# Derived stats
+# ---------- Derived stats (live) ----------
 var _current_damage: int = 1
-var _current_fire_rate: float = 1.0
+var _current_fire_rate: float = 1.0        # seconds between shots
 var _current_acquire_range: float = 12.0
 const _FIRE_RATE_MIN: float = 0.05
 
 var _range_shapes: Array[CollisionShape3D] = []
 
+# =========================================================
+# Lifecycle
+# =========================================================
 func _ready() -> void:
+	add_to_group("turret")
+
 	_resolve_minerals()
 	if not _attempt_build_payment():
-		emit_signal("build_denied", build_cost)
+		build_denied.emit(build_cost)
 		queue_free()
 		return
-	emit_signal("build_paid", build_cost)
+	build_paid.emit(build_cost)
 
 	DetectionArea.body_entered.connect(_on_body_entered)
 	DetectionArea.body_exited.connect(_on_body_exited)
@@ -75,16 +76,16 @@ func _ready() -> void:
 	_gather_range_shapes()
 	if base_acquire_range <= 0.0:
 		var detected := _detect_initial_range()
-		if detected > 0.0:
-			base_acquire_range = detected
-		else:
-			base_acquire_range = 12.0
+		base_acquire_range = (detected if detected > 0.0 else 12.0)
 
 	if PowerUps != null and PowerUps.has_signal("changed"):
 		PowerUps.changed.connect(func(): _recompute_stats())
 
 	_recompute_stats()
 
+# =========================================================
+# Economy helpers
+# =========================================================
 func set_minerals_ref(n: Node) -> void:
 	_minerals = n
 
@@ -99,18 +100,14 @@ func _resolve_minerals() -> void:
 			_minerals = root.find_child("Minerals", true, false)
 
 func _attempt_build_payment() -> bool:
-	if build_cost <= 0:
-		return true
+	if build_cost <= 0: return true
 	return _try_spend(build_cost)
 
 func _try_spend(amount: int) -> bool:
-	if amount <= 0:
-		return true
-	if _minerals == null:
-		return false
+	if amount <= 0 or _minerals == null:
+		return amount <= 0
 	if _minerals.has_method("spend"):
 		return bool(_minerals.call("spend", amount))
-
 	var ok := false
 	if _minerals.has_method("can_afford"):
 		ok = bool(_minerals.call("can_afford", amount))
@@ -122,82 +119,86 @@ func _try_spend(amount: int) -> bool:
 		if _minerals.has("minerals"):
 			var cur2 := 0
 			var v = _minerals.get("minerals")
-			if typeof(v) == TYPE_INT:
-				cur2 = int(v)
+			if typeof(v) == TYPE_INT: cur2 = int(v)
 			_minerals.set("minerals", max(0, cur2 - amount))
 			return true
 	return false
 
 func _get_balance() -> int:
-	if _minerals == null:
-		return 0
-	if _minerals.has("minerals"):
+	if _minerals and _minerals.has("minerals"):
 		var v = _minerals.get("minerals")
-		if typeof(v) == TYPE_INT:
-			return int(v)
+		if typeof(v) == TYPE_INT: return int(v)
 	return 0
 
-# Upgrades
-func get_damage_upgrade_cost() -> int:
-	return PowerUps.upgrade_cost("turret_damage")
-
-func upgrade_damage() -> bool:
-	if PowerUps.purchase("turret_damage"):
-		_recompute_stats()
-		emit_signal("upgraded", "damage", 0, 0)
-		return true
-	return false
-
+# =========================================================
+# Upgrades (local)
+# =========================================================
 func get_rate_upgrade_cost() -> int:
-	if rate_level >= rate_level_max:
-		return 0
-	return _scaled_cost(rate_cost_base, rate_cost_scale, rate_level)
+	if rate_level >= rate_level_max: return 0
+	return _scaled_cost(12, 1.35, rate_level)
 
 func get_range_upgrade_cost() -> int:
-	if range_level >= range_level_max:
-		return 0
-	return _scaled_cost(range_cost_base, range_cost_scale, range_level)
+	if range_level >= range_level_max: return 0
+	return _scaled_cost(10, 1.30, range_level)
 
 func upgrade_fire_rate() -> bool:
-	if rate_level >= rate_level_max:
-		return false
+	if rate_level >= rate_level_max: return false
 	var cost := get_rate_upgrade_cost()
-	if not _try_spend(cost):
-		return false
+	if not _try_spend(cost): return false
 	rate_level += 1
 	_recompute_stats()
-	emit_signal("upgraded", "fire_rate", rate_level, cost)
+	upgraded.emit("fire_rate", rate_level, cost)
 	return true
 
 func upgrade_range() -> bool:
-	if range_level >= range_level_max:
-		return false
+	if range_level >= range_level_max: return false
 	var cost := get_range_upgrade_cost()
-	if not _try_spend(cost):
-		return false
+	if not _try_spend(cost): return false
 	range_level += 1
 	_recompute_stats()
-	emit_signal("upgraded", "range", range_level, cost)
+	upgraded.emit("range", range_level, cost)
 	return true
+
+func upgrade_damage() -> bool:
+	# Global, via PowerUps
+	if PowerUps != null and PowerUps.purchase("turret_damage"):
+		_recompute_stats()
+		upgraded.emit("damage", 0, 0)
+		return true
+	return false
 
 func _scaled_cost(base_cost: int, scale: float, level: int) -> int:
 	var c := float(base_cost) * pow(max(1.0, scale), max(0, level))
 	return int(round(max(1.0, c)))
 
+# =========================================================
+# Derived stats
+# =========================================================
 func _recompute_stats() -> void:
-	if PowerUps != null:
+	# Damage
+	if PowerUps != null and PowerUps.has_method("turret_damage_value"):
 		_current_damage = PowerUps.turret_damage_value()
 	else:
 		_current_damage = base_damage
-	var mult := pow(max(0.01, rate_mult_per_level), rate_level)
-	_current_fire_rate = clamp(base_fire_rate * mult, _FIRE_RATE_MIN, 999.0)
-	var base_r := base_acquire_range
-	if base_r <= 0.0:
-		base_r = 12.0
-	_current_acquire_range = max(0.5, base_r + range_per_level * float(range_level))
+
+	# Fire interval = base * local * global, clamped
+	var local_mult := pow(max(0.01, rate_mult_per_level), rate_level)
+	var global_mult := 1.0
+	if PowerUps != null and PowerUps.has_method("turret_rate_mult"):
+		global_mult = maxf(0.01, PowerUps.turret_rate_mult())
+	_current_fire_rate = clamp(base_fire_rate * local_mult * global_mult, _FIRE_RATE_MIN, 999.0)
+
+	# Acquire range = base + local + global
+	var local_add := range_per_level * float(range_level)
+	var global_add := 0.0
+	if PowerUps != null and PowerUps.has_method("turret_range_bonus"):
+		global_add = PowerUps.turret_range_bonus()
+	_current_acquire_range = max(0.5, base_acquire_range + local_add + global_add)
 	_apply_range_to_area(_current_acquire_range)
 
+# =========================================================
 # Targeting + firing
+# =========================================================
 func _on_body_entered(body: Node) -> void:
 	if body.is_in_group("enemy"):
 		targets_in_range.append(body as Node3D)
@@ -209,7 +210,8 @@ func _on_body_exited(body: Node) -> void:
 			_disconnect_target_signals()
 			target = null
 
-func _process(_delta: float) -> void:
+func _process(_dt: float) -> void:
+	# prune dead
 	var keep: Array[Node3D] = []
 	for e in targets_in_range:
 		if is_instance_valid(e):
@@ -231,14 +233,12 @@ func _process(_delta: float) -> void:
 			fire()
 
 func _select_target() -> Node3D:
-	if targets_in_range.is_empty():
-		return null
+	if targets_in_range.is_empty(): return null
 	var best: Node3D = null
-	var best_d: float = INF
+	var best_d := INF
 	var origin := global_transform.origin
 	for e in targets_in_range:
-		if e == null or not is_instance_valid(e):
-			continue
+		if e == null or not is_instance_valid(e): continue
 		var d := origin.distance_to(e.global_transform.origin)
 		if d < best_d:
 			best_d = d
@@ -246,8 +246,7 @@ func _select_target() -> Node3D:
 	return best
 
 func fire() -> void:
-	if target == null or not is_instance_valid(target):
-		return
+	if target == null or not is_instance_valid(target): return
 	can_fire = false
 
 	var victim := target
@@ -268,25 +267,35 @@ func fire() -> void:
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
 
-# Damage
+# =========================================================
+# Damage context
+# =========================================================
 func _build_damage_context() -> Dictionary:
+	var crit_ch: float = 0.0
+	var crit_mul: float = 2.0
+	if PowerUps != null:
+		if PowerUps.has_method("crit_chance_value"):
+			crit_ch = clampf(PowerUps.crit_chance_value(), 0.0, 1.0)
+		if PowerUps.has_method("crit_mult_value"):
+			crit_mul = maxf(1.0, PowerUps.crit_mult_value())
+
 	return {
 		"source": "turret",
 		"tags": ["physical", "hitscan"],
 		"base": _current_damage,
 		"flat_bonus": 0,
 		"mult": 1.0,
-		"crit_chance": 0.0,
-		"crit_mult": 2.0
+		"crit_chance": crit_ch,
+		"crit_mult": crit_mul
 	}
 
 func _apply_damage(enemy: Node, ctx: Dictionary) -> void:
-	if enemy == null or not is_instance_valid(enemy):
-		return
-	if enemy.has_method("take_damage"):
+	if enemy and is_instance_valid(enemy) and enemy.has_method("take_damage"):
 		enemy.call("take_damage", ctx)
 
+# =========================================================
 # Range helpers
+# =========================================================
 func _gather_range_shapes() -> void:
 	_range_shapes.clear()
 	_collect_shapes_recursive(DetectionArea)
@@ -294,28 +303,24 @@ func _gather_range_shapes() -> void:
 func _collect_shapes_recursive(n: Node) -> void:
 	for c in n.get_children():
 		var cs := c as CollisionShape3D
-		if cs != null and cs.shape != null:
+		if cs and cs.shape != null:
 			_range_shapes.append(cs)
 		_collect_shapes_recursive(c)
 
 func _detect_initial_range() -> float:
 	for cs in _range_shapes:
 		var s := cs.shape
-		if s is SphereShape3D:
-			return (s as SphereShape3D).radius
-		elif s is CylinderShape3D:
-			return (s as CylinderShape3D).radius
-		elif s is CapsuleShape3D:
-			return (s as CapsuleShape3D).radius
-		elif s is BoxShape3D:
+		if s is SphereShape3D:   return (s as SphereShape3D).radius
+		if s is CylinderShape3D: return (s as CylinderShape3D).radius
+		if s is CapsuleShape3D:  return (s as CapsuleShape3D).radius
+		if s is BoxShape3D:
 			var sz := (s as BoxShape3D).size
 			return max(sz.x, sz.z) * 0.5
 	return 0.0
 
 func _apply_range_to_area(r: float) -> void:
 	for cs in _range_shapes:
-		if cs.shape == null:
-			continue
+		if cs.shape == null: continue
 		var s: Shape3D = cs.shape.duplicate()
 		s.resource_local_to_scene = true
 		if s is SphereShape3D:
@@ -330,13 +335,13 @@ func _apply_range_to_area(r: float) -> void:
 			b.size = Vector3(r * 2.0, sz.y, r * 2.0)
 		cs.shape = s
 
+# =========================================================
 # FX
+# =========================================================
 func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
-	if projectile_scene == null:
-		return
+	if projectile_scene == null: return
 	var tracer := projectile_scene.instantiate() as Node3D
-	if tracer == null:
-		return
+	if tracer == null: return
 	get_tree().current_scene.add_child(tracer)
 	tracer.global_position = start_pos
 
@@ -347,9 +352,8 @@ func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
 		tracer.look_at(end_pos, Vector3.UP)
 		tracer.scale = s
 		var dist2: float = start_pos.distance_to(end_pos)
-		var dur: float = 0.05
-		if tracer_speed > 0.0:
-			dur = max(dist2 / tracer_speed, 0.05)
+		var dur: float = (dist2 / tracer_speed) if tracer_speed > 0.0 else 0.05
+		dur = max(dur, 0.05)
 		var tw := get_tree().create_tween()
 		tw.tween_property(tracer, "global_position", end_pos, dur)
 		tw.tween_callback(tracer.queue_free)
@@ -373,20 +377,33 @@ func _play_shoot_fx() -> void:
 		_anim.stop()
 		_anim.play(clip)
 
-# Target death
+# =========================================================
+# Target death wiring
+# =========================================================
 func _connect_target_signals(t: Node) -> void:
-	if t == null:
-		return
-	if t.has_signal("died"):
-		if not t.is_connected("died", Callable(self, "_on_target_died")):
-			t.connect("died", Callable(self, "_on_target_died"))
+	if t == null: return
+	if t.has_signal("died") and not t.is_connected("died", Callable(self, "_on_target_died")):
+		t.connect("died", Callable(self, "_on_target_died"))
 
 func _disconnect_target_signals() -> void:
-	if target == null:
-		return
+	if target == null: return
 	if target.has_signal("died") and target.is_connected("died", Callable(self, "_on_target_died")):
 		target.disconnect("died", Callable(self, "_on_target_died"))
 
 func _on_target_died() -> void:
 	_disconnect_target_signals()
 	target = null
+
+# =========================================================
+# Getters (used by HUD/PowerUps helpers)
+# =========================================================
+func get_base_fire_rate() -> float:        return float(base_fire_rate)
+func get_rate_mult_per_level() -> float:   return float(rate_mult_per_level)
+func get_rate_level() -> int:              return int(rate_level)
+func get_min_fire_interval() -> float:     return float(_FIRE_RATE_MIN)
+func get_current_fire_interval() -> float: return float(_current_fire_rate)
+
+func get_base_acquire_range() -> float:        return float(base_acquire_range)
+func get_range_per_level() -> float:           return float(range_per_level)
+func get_range_level() -> int:                 return int(range_level)
+func get_current_acquire_range() -> float:     return float(_current_acquire_range)

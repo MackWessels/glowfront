@@ -126,8 +126,9 @@ func set_entry_target(p: Vector3, radius: float) -> void:
 func apply_stats(s: Dictionary) -> void:
 	if s.has("health"): health = int(s["health"])
 	if s.has("attack"): attack = int(s["attack"])
-	if s.has("speed"):  speed  = float(s["speed"])
 	if s.has("mass"):   mass   = float(s["mass"])
+	if s.has("speed"):  speed  = float(s["speed"])
+
 
 # ---------------- Combat ----------------
 func take_damage(ctx: Dictionary) -> void:

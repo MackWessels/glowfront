@@ -1,7 +1,7 @@
 extends Node3D
 class_name EnemySpawner
 
-# ---------- Setup ----------
+# ---------------- Setup ----------------
 @export var tile_board_path: NodePath
 @export var enemy_scene: PackedScene
 
@@ -20,22 +20,21 @@ class_name EnemySpawner
 @export var use_entry_step: bool = true
 @export var entry_step_radius_tiles: float = 0.9
 
-# ---------- Waves ----------
+# ---------------- Waves ----------------
 @export var wave_index: int = 1
 @export var wave_time_sec: float = 18.0
 @export var wave_cooldown_sec: float = 3.0
 @export var base_wave_count: int = 10
 @export var per_wave_count: int = 2
-@export var wave_frontload_frac: float = 0.30   # % of the wave spawned instantly
+@export var wave_frontload_frac: float = 0.30
 
-# ---------- Levels (color only; stats = HP) ----------
+# ---------------- Levels (HP only) ----------------
 @export var lvl1_base_hp: int = 3
 @export var lvl2_base_hp: int = 7
 @export var lvl3_base_hp: int = 14
 @export var lvl4_base_hp: int = 22
-@export var hp_per_wave_pct: float = 0.22       # +22% per wave
+@export var hp_per_wave_pct: float = 0.22
 
-# weights and per-wave ramp
 @export var lvl1_w_start: float = 70.0
 @export var lvl2_w_start: float = 20.0
 @export var lvl3_w_start: float = 9.0
@@ -44,7 +43,17 @@ class_name EnemySpawner
 @export var lvl3_w_per_wave: float = 0.35
 @export var lvl4_w_per_wave: float = 0.15
 
-# ---------- State ----------
+# ---------------- Speed control (ONLY 'speed') ----------------
+@export var base_speed: float = 2.0            # matches Enemy default
+@export var speed_per_wave_pct: float = 0.08   # +8% per wave
+@export var lvl2_speed_mult: float = 1.05
+@export var lvl3_speed_mult: float = 1.12
+@export var lvl4_speed_mult: float = 1.20
+@export var speed_jitter_pct: float = 0.0      # keep simple; set >0 for spice
+@export var clamp_speed_min: float = 0.25
+@export var clamp_speed_max: float = 20.0
+
+# ---------------- State ----------------
 var _board: Node = null
 var _timer: Timer
 var _phase_timer: Timer
@@ -74,18 +83,16 @@ func _ready() -> void:
 		_board = get_tree().get_first_node_in_group("TileBoard")
 
 	if auto_start:
-		_attempt_autostart_when_board_ready()
+		_queue_autostart_when_board_ready()
 
-# wait for TileBoard to emit first path signal, then start
-func _attempt_autostart_when_board_ready() -> void:
+# Start only after TileBoard signals its first computed path (race-safe)
+func _queue_autostart_when_board_ready() -> void:
 	if _board != null and _board.has_signal("global_path_changed"):
-		_board.connect("global_path_changed", Callable(self, "_do_autostart"), Object.CONNECT_ONE_SHOT)
-		await get_tree().process_frame  # safety if path already computed
-		_do_autostart()
+		_board.connect("global_path_changed", Callable(self, "_on_board_ready_autostart"), Object.CONNECT_ONE_SHOT)
 	else:
-		call_deferred("_do_autostart")
+		call_deferred("_on_board_ready_autostart")
 
-func _do_autostart() -> void:
+func _on_board_ready_autostart() -> void:
 	if _phase == "idle":
 		start_spawning()
 
@@ -111,8 +118,10 @@ func stop_spawning() -> void:
 
 func pause_spawning(on: bool) -> void:
 	_paused = on
-	if on: stop_spawning()
-	else:  start_spawning()
+	if on:
+		stop_spawning()
+	else:
+		start_spawning()
 
 func set_rate(seconds_per_spawn: float) -> void:
 	spawn_interval = maxf(0.05, seconds_per_spawn)
@@ -167,9 +176,11 @@ func _spawn_one() -> void:
 	if _board == null or not _board.has_method("get_spawn_pen"):
 		return
 
-	var span: int = (span_override if span_override > 0 else _get_board_int("spawner_span", 3))
-	var info: Dictionary = _board.get_spawn_pen(span)
+	var span: int = span_override
+	if span <= 0:
+		span = _get_board_int("spawner_span", 3)
 
+	var info: Dictionary = _board.get_spawn_pen(span)
 	var exits: Array = info.get("entry_targets", [])
 	var fwd: Vector3 = info.get("forward", Vector3.FORWARD)
 	var lat: Vector3 = info.get("lateral", Vector3.RIGHT)
@@ -179,7 +190,7 @@ func _spawn_one() -> void:
 	var tile_w: float = _tile_w()
 	var exit_radius: float = float(info.get("exit_radius", 0.35 * tile_w))
 
-	# pick random spot across the whole opening, then move outward
+	# pick random spot across the opening, then offset outward
 	var p_edge: Vector3 = _pick_random_on_span(exits, lat)
 	var outward: float = maxf(0.0, spawn_outward_tiles) * tile_w
 	var p: Vector3 = p_edge - fwd * outward
@@ -201,14 +212,14 @@ func _spawn_one() -> void:
 	if inst.has_signal("died"):
 		inst.died.connect(_on_enemy_died)
 
-	# choose level and inject stats (HP only)
+	# level + stats (HP + speed only; attack/mass fixed here for now)
 	var lvl: int = _pick_level_for_wave(wave_index)
 	if inst.has_method("set_level"):
 		inst.call("set_level", lvl)
 	else:
 		inst.set("level", lvl)
 
-	var stats: Dictionary = _compute_stats_for_level(lvl, wave_index)
+	var stats: Dictionary = _compute_stats_for_level_and_wave(lvl, wave_index)
 	if inst.has_method("apply_stats"):
 		inst.call("apply_stats", stats)
 	else:
@@ -221,12 +232,12 @@ func _spawn_one() -> void:
 		if inst3.has_method("lock_y_to"):
 			inst3.call("lock_y_to", p.y)
 		if use_entry_step and inst3.has_method("set_entry_target"):
-			inst3.call("set_entry_target", p_edge, maxf(exit_radius, entry_step_radius_tiles * tile_w))
+			var r := maxf(exit_radius, entry_step_radius_tiles * tile_w)
+			inst3.call("set_entry_target", p_edge, r)
 		if nudge_on_spawn > 0.0:
 			var nudge: float = tile_w * 0.12 * clampf(nudge_on_spawn, 0.0, 1.0)
 			inst3.global_position += fwd * nudge
-		if inst3.has_method("look_at"):
-			inst3.look_at(inst3.global_position + fwd, Vector3.UP)
+		inst3.look_at(inst3.global_position + fwd, Vector3.UP)
 
 	_alive += 1
 
@@ -242,14 +253,20 @@ func _on_enemy_died() -> void:
 func _tile_w() -> float:
 	if _board and _board.has_method("tile_world_size"):
 		return float(_board.call("tile_world_size"))
-	var tv: Variant = _board.get("tile_size") if _board else 1.0
-	return float(tv) if (typeof(tv) == TYPE_FLOAT or typeof(tv) == TYPE_INT) else 1.0
+	var tv: Variant = 1.0
+	if _board:
+		tv = _board.get("tile_size")
+	if typeof(tv) == TYPE_FLOAT or typeof(tv) == TYPE_INT:
+		return float(tv)
+	return 1.0
 
 func _get_board_int(prop: String, def: int) -> int:
 	if _board == null:
 		return def
 	var v: Variant = _board.get(prop)
-	return int(v) if typeof(v) in [TYPE_INT, TYPE_FLOAT] else def
+	if typeof(v) == TYPE_INT or typeof(v) == TYPE_FLOAT:
+		return int(v)
+	return def
 
 func _pick_random_on_span(exits: Array, lat: Vector3) -> Vector3:
 	var lat_n: Vector3 = lat.normalized()
@@ -267,7 +284,7 @@ func _pick_random_on_span(exits: Array, lat: Vector3) -> Vector3:
 	var along: float = lerpf(min_proj, max_proj, t)
 	return origin + lat_n * along
 
-# ---------- Wave helpers ----------
+# ---------------- Wave helpers ----------------
 func _calc_wave_total() -> int:
 	return int(base_wave_count + per_wave_count * max(0, wave_index - 1))
 
@@ -286,17 +303,33 @@ func _pick_level_for_wave(wave: int) -> int:
 	if r < w3: return 3
 	return 4
 
-func _compute_stats_for_level(level: int, wave: int) -> Dictionary:
+func _compute_stats_for_level_and_wave(level: int, wave: int) -> Dictionary:
+	# --- HP ---
 	var base_hp: int = lvl1_base_hp
-	match level:
-		1: base_hp = lvl1_base_hp
-		2: base_hp = lvl2_base_hp
-		3: base_hp = lvl3_base_hp
-		4: base_hp = lvl4_base_hp
+	if level == 2: base_hp = lvl2_base_hp
+	elif level == 3: base_hp = lvl3_base_hp
+	elif level == 4: base_hp = lvl4_base_hp
 	var hp_scale: float = 1.0 + hp_per_wave_pct * float(max(0, wave - 1))
 	var hp: int = int(round(float(base_hp) * hp_scale))
+
+	# --- Speed (only) ---
+	var level_mult: float = 1.0
+	if level == 2: level_mult = lvl2_speed_mult
+	elif level == 3: level_mult = lvl3_speed_mult
+	elif level == 4: level_mult = lvl4_speed_mult
+
+	var wave_mult: float = 1.0 + speed_per_wave_pct * float(max(0, wave - 1))
+	var jitter: float = 1.0
+	if speed_jitter_pct > 0.0:
+		jitter = 1.0 + randf_range(-speed_jitter_pct, speed_jitter_pct)
+
+	var final_speed: float = base_speed * level_mult * wave_mult * jitter
+	if final_speed < clamp_speed_min: final_speed = clamp_speed_min
+	if final_speed > clamp_speed_max: final_speed = clamp_speed_max
+
 	return {
 		"health": hp,
 		"attack": 1,
-		"mass": 1.0
+		"mass": 1.0,
+		"speed": final_speed
 	}

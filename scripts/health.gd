@@ -4,7 +4,7 @@ signal defeated()
 
 @export var debug_prints: bool = true
 
-@export var base_max_hp: int = 500
+@export var base_max_hp: int = 50
 @export var hp_per_level: int = 10         
 @export var base_regen_per_sec: float = 0.0
 @export var regen_per_level: float = 0.5   
@@ -31,7 +31,7 @@ func damage(amount: int, reason: String = "") -> void:
 	hp = max(0.0, hp - float(amount))
 	var after := int(ceil(hp))
 	emit_signal("changed", after, max_hp)
-	_log("damage  -> -%d (%s)  %d → %d / %d" % [amount, reason, before, after, max_hp])
+	#_log("damage  -> -%d (%s)  %d → %d / %d" % [amount, reason, before, after, max_hp])
 	if hp <= 0.0:
 		_log("defeat!")
 		emit_signal("defeated")
