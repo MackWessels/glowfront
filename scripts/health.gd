@@ -5,7 +5,7 @@ signal defeated()
 @export var debug_prints: bool = true
 @export var log_only_damage: bool = true   # true = only print on damage/defeat
 
-@export var base_max_hp: int = 5
+@export var base_max_hp: int = 50
 @export var hp_per_level: int = 10
 @export var base_regen_per_sec: float = 0.0
 @export var regen_per_level: float = 0.5

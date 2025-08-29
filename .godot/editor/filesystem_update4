@@ -9,7 +9,3 @@ res://scenes/main_menu.tscn
 res://scenes/wall.tscn
 res://scenes/tower.tscn
 res://scenes/goal.tscn
-res://scripts/health.gd
-res://scripts/power_ups.gd
-res://scripts/power_ups_hud.gd
-res://scripts/tower.gd

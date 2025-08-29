@@ -63,7 +63,6 @@ var _entry_active: bool = false
 var _entry_target: Vector3 = Vector3.ZERO
 @export var _entry_radius: float = 0.4
 
-# Optional seed from spawner for first-lane offset
 var _lane_signature: float = 9999.0
 
 # Visual handle

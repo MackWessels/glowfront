@@ -58,7 +58,7 @@ const PENDING_POLL_HZ := 6.0
 signal global_path_changed
 
 # ---------------- State ----------------
-var tiles: Dictionary = {}
+var tiles: Dictionary = {}                    # Vector2i -> Node3D
 var active_tile: Node = null
 
 var _pending_tile: Node = null
@@ -87,7 +87,7 @@ func _ready() -> void:
 	generate_board()
 
 	var origin_tile := tiles.get(Vector2i(0, 0), null) as Node3D
-	_grid_origin = origin_tile.global_position
+	_grid_origin = (origin_tile.global_position if origin_tile != null else global_position)
 	_step = tile_size
 
 	# Portals: default spawner at left, goal at right
@@ -105,6 +105,9 @@ func _ready() -> void:
 	if placement_menu and not placement_menu.is_connected("place_selected", Callable(self, "_on_place_selected")):
 		placement_menu.connect("place_selected", Callable(self, "_on_place_selected"))
 
+	# >>> Autoload-safe PowerUps hookup (deferred) <<<
+	call_deferred("_connect_powerups")
+
 func _physics_process(delta: float) -> void:
 	if _pending_builds.size() > 0:
 		_poll_accum += delta
@@ -116,6 +119,24 @@ func _physics_process(delta: float) -> void:
 func rebuild_bounds() -> void:
 	if use_bounds:
 		_create_bounds()
+
+# ---------------- PowerUps autoload hookup ----------------
+func _connect_powerups() -> void:
+	var pu := get_node_or_null("/root/PowerUps")
+	if pu == null:
+		return
+	if pu.has_signal("upgrade_purchased") and not pu.is_connected("upgrade_purchased", Callable(self, "_on_upgrade_purchased")):
+		pu.connect("upgrade_purchased", Callable(self, "_on_upgrade_purchased"))
+
+func _on_upgrade_purchased(id: String, _lvl: int, _next_cost: int) -> void:
+	match id:
+		"board_add_left":
+			_add_row_at_top()        # TOP row (goal-perspective left)
+		"board_add_right":
+			_add_row_at_bottom()     # BOTTOM row (goal-perspective right)
+		"board_push_back":
+			_add_column_at_spawner_edge()
+
 
 # ---------------- Public helpers (Enemy) ----------------
 func tile_world_size() -> float:
@@ -758,9 +779,12 @@ func _queue_pending_build(cell: Vector2i, tile: Node, action: String, cost_val: 
 
 # ---------------- BOUNDS & PENS ----------------
 func _create_bounds() -> void:
-	var old := get_node_or_null("BoardBounds")
-	if old:
-		old.queue_free()
+	# Remove ALL previous boundary containers immediately
+	while true:
+		var old := get_node_or_null("BoardBounds")
+		if old == null:
+			break
+		old.free()  # immediate, avoids a frame with overlapping old walls
 
 	var container := Node3D.new()
 	container.name = "BoardBounds"
@@ -776,16 +800,17 @@ func _create_bounds() -> void:
 	if carve_openings_for_portals:
 		var b := _grid_bounds()
 
+		# Spawner opening
 		var sp_cell := world_to_cell(spawner_node.global_position)
 		var sp_side := _side_of_cell(sp_cell, b)
 		var sp_edge := sp_cell
-		if sp_side == "left":   sp_edge.x = b.position.x
+		if sp_side == "left":    sp_edge.x = b.position.x
 		elif sp_side == "right": sp_edge.x = b.position.x + b.size.x - 1
 		elif sp_side == "top":   sp_edge.y = b.position.y
 		else:                    sp_edge.y = b.position.y + b.size.y - 1
-		var sp_open: Vector2 = _opening_range_for(sp_side, sp_edge, spawner_span)
-		openings[sp_side].append(sp_open)
+		openings[sp_side].append(_opening_range_for(sp_side, sp_edge, spawner_span))
 
+		# Goal opening
 		var gl_cell := world_to_cell(goal_node.global_position)
 		var gl_side := _side_of_cell(gl_cell, b)
 		var gl_edge := gl_cell
@@ -793,14 +818,15 @@ func _create_bounds() -> void:
 		elif gl_side == "right": gl_edge.x = b.position.x + b.size.x - 1
 		elif gl_side == "top":   gl_edge.y = b.position.y
 		else:                    gl_edge.y = b.position.y + b.size.y - 1
-		var gl_open: Vector2 = _opening_range_for(gl_side, gl_edge, max(1, goal_span))
-		openings[gl_side].append(gl_open)
+		openings[gl_side].append(_opening_range_for(gl_side, gl_edge, max(1, goal_span)))
 
+	# Rebuild boundary walls
 	_build_side_walls(container, "top",    top_z,    left_x, right_x, openings["top"])
 	_build_side_walls(container, "bottom", bottom_z, left_x, right_x, openings["bottom"])
 	_build_side_walls(container, "left",   left_x,   top_z,  bottom_z, openings["left"])
 	_build_side_walls(container, "right",  right_x,  top_z,  bottom_z, openings["right"])
 
+	# Rebuild pens
 	if build_spawn_pen or build_goal_pen:
 		_build_pens_for(container, openings)
 
@@ -899,7 +925,7 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 		_make_wall(container, back_c2, max(0.0, ext_b2 - ext_a2), pen_thickness, pen_height, "PenBottom_Back")
 		var wing_z_center2: float = bottom_z + (depth_w + inset) * 0.5
 		_make_wall(container, Vector3(ext_a2, 0.0, wing_z_center2), pen_thickness, inner_depth_bottom, pen_height, "PenBottom_WingL")
-		_make_wall(container, Vector3(ext_b2, 0.0, wing_z_center2), pen_thickness, inner_depth_bottom, pen_height, "PenBottom_WingR")
+		_make_wall(container, Vector3(ext_b2, 0.0, wing_z_center2), pen_thickness, inner_depth_bottom, pen_height, "PenBottom_WingR")  # <-- fixed
 
 	# LEFT
 	for o3 in openings["left"]:
@@ -929,7 +955,7 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_a4), inner_depth_right, pen_thickness, pen_height, "PenRight_WingT")
 		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_b4), inner_depth_right, pen_thickness, pen_height, "PenRight_WingB")
 
-# StaticBody3D + BoxShape3D (+ optional BoxMesh)
+# StaticBody3D + BoxShape3D 
 func _make_wall(parent: Node3D, center_on_ground: Vector3, size_x: float, size_z: float, height: float, name: String) -> void:
 	if size_x <= 0.0001 or size_z <= 0.0001 or height <= 0.0001:
 		return
@@ -955,3 +981,162 @@ func _make_wall(parent: Node3D, center_on_ground: Vector3, size_x: float, size_z
 func _emit_path_changed() -> void:
 	path_version += 1
 	emit_signal("global_path_changed")
+
+# =================================================================
+#                     BOARD EXPANSION HELPERS
+# =================================================================
+
+# Add a ROW on the TOP edge 
+func _add_row_at_top() -> void:
+	_grid_origin.z -= _step
+	board_size_z += 1
+
+	# Retag any cached enemy cell indices (no world translation)
+	_retag_enemy_cells(0, 1)
+
+	# Reindex existing tiles and spawn the new top row (z = 0)
+	var new_tiles: Dictionary = {}
+	for key in tiles.keys():
+		var c: Vector2i = key
+		var nkey := Vector2i(c.x, c.y + 1)
+		var t: Node3D = tiles[key]
+		t.set("grid_position", nkey)
+		new_tiles[nkey] = t
+	tiles = new_tiles
+
+	for x in range(board_size_x):
+		var c2 := Vector2i(x, 0)
+		if tiles.has(c2):
+			continue
+		var tile := tile_scene.instantiate() as Node3D
+		add_child(tile)
+		tile.global_position = cell_to_world(c2)
+		tile.set("grid_position", c2)
+		tile.set("tile_board", self)
+		tile.set("placement_menu", placement_menu)
+		tiles[c2] = tile
+
+	rebuild_bounds()
+	_recompute_flow()
+	_emit_path_changed()
+
+
+# Add a ROW on the BOTTOM edge 
+func _add_row_at_bottom() -> void:
+	var new_z := board_size_z
+	board_size_z += 1
+
+	for x in range(board_size_x):
+		var c := Vector2i(x, new_z)
+		var tile := tile_scene.instantiate() as Node3D
+		add_child(tile)
+		tile.global_position = cell_to_world(c)
+		tile.set("grid_position", c)
+		tile.set("tile_board", self)
+		tile.set("placement_menu", placement_menu)
+		tiles[c] = tile
+
+	# do NOT call _place_spawner_offboard_strip() here
+	rebuild_bounds()
+	_recompute_flow()
+	_emit_path_changed()
+
+
+# Add a COLUMN on the spawner edge
+func _add_column_at_spawner_edge() -> void:
+	var b := _grid_bounds()
+	var sp_cell := world_to_cell(spawner_node.global_position)
+	var side := _side_of_cell(sp_cell, b)
+
+	match side:
+		"left":
+			_translate_live_enemies(Vector3(_step, 0.0, 0.0), 1, 0)
+
+			_grid_origin.x -= _step
+			board_size_x += 1
+
+			var new_tiles: Dictionary = {}
+			for key in tiles.keys():
+				var c: Vector2i = key
+				var nkey := Vector2i(c.x + 1, c.y)
+				var t: Node3D = tiles[key]
+				t.set("grid_position", nkey)
+				new_tiles[nkey] = t
+			tiles = new_tiles
+
+			# Create new column at x = 0
+			for z in range(board_size_z):
+				var c0 := Vector2i(0, z)
+				if tiles.has(c0):
+					continue
+				var tile := tile_scene.instantiate() as Node3D
+				add_child(tile)
+				tile.global_position = cell_to_world(c0)
+				tile.set("grid_position", c0)
+				tile.set("tile_board", self)
+				tile.set("placement_menu", placement_menu)
+				tiles[c0] = tile
+
+		"right":
+			# Append on the right 
+			var new_x := board_size_x
+			board_size_x += 1
+			for z in range(board_size_z):
+				var c1 := Vector2i(new_x, z)
+				var tile1 := tile_scene.instantiate() as Node3D
+				add_child(tile1)
+				tile1.global_position = cell_to_world(c1)
+				tile1.set("grid_position", c1)
+				tile1.set("tile_board", self)
+				tile1.set("placement_menu", placement_menu)
+				tiles[c1] = tile1
+
+		"top":
+			pass
+		"bottom":
+			pass
+
+
+	# Rebuild pens & move spawner out from new edge
+	_place_spawner_offboard_strip()
+	rebuild_bounds()
+	_recompute_flow()
+	_emit_path_changed()
+
+# ---------------- Enemy retag helper (indices only; no world move) ----------------
+func _retag_enemy_cells(dx: int, dz: int) -> void:
+	if dx == 0 and dz == 0:
+		return
+	var enemies: Array = get_tree().get_nodes_in_group(ENEMY_GROUP)
+	for n in enemies:
+		if n == null or not is_instance_valid(n):
+			continue
+		var cvar: Variant = n.get("current_cell")
+		if typeof(cvar) == TYPE_VECTOR2I:
+			var c: Vector2i = cvar
+			n.set("current_cell", Vector2i(c.x + dx, c.y + dz))
+
+# =================================================================
+# Moves enemies and any cached world waypoints
+func _translate_live_enemies(delta_world: Vector3, dx: int, dz: int) -> void:
+	if delta_world == Vector3.ZERO and dx == 0 and dz == 0:
+		return
+	var enemies: Array = get_tree().get_nodes_in_group(ENEMY_GROUP)
+	for n in enemies:
+		var n3 := n as Node3D
+		if n3 == null or not is_instance_valid(n3):
+			continue
+
+		# Keep the physical position
+		if delta_world != Vector3.ZERO:
+			n3.global_position += delta_world
+			for k in ["target_world", "target_pos", "next_wp"]:
+				var v: Variant = n3.get(k)
+				if typeof(v) == TYPE_VECTOR3:
+					n3.set(k, (v as Vector3) + delta_world)
+
+		if dx != 0 or dz != 0:
+			var cvar: Variant = n3.get("current_cell")
+			if typeof(cvar) == TYPE_VECTOR2I:
+				var c: Vector2i = cvar
+				n3.set("current_cell", Vector2i(c.x + dx, c.y + dz))

@@ -1,6 +1,6 @@
 extends Node
 
-@export var starting_balance: int = 50
+@export var starting_balance: int = 50000
 
 func _ready() -> void:
 	if typeof(Economy) != TYPE_NIL and Economy.has_method("setup"):

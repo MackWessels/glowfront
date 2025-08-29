@@ -13,23 +13,23 @@ extends Camera3D
 @export var max_pitch_deg: float = -10.0
 
 # Feel
-@export var rotate_sensitivity: float = 0.3    
-@export var zoom_step: float = 2.0              
-@export var keyboard_rotate_speed: float = 90.0  
+@export var rotate_sensitivity: float = 0.3
+@export var zoom_step: float = 2.0
+@export var keyboard_rotate_speed: float = 90.0
 
-# Panning 
+# Panning
 @export var pan_speed: float = 20.0
-@export var pan_fast_mult: float = 2.5         
-@export var pan_slow_mult: float = 0.5          
+@export var pan_fast_mult: float = 2.5
+@export var pan_slow_mult: float = 0.5
 
-var _rotating := false
-var _pan_offset: Vector3 = Vector3.ZERO    
+var _rotating: bool = false
+var _pan_offset: Vector3 = Vector3.ZERO
 
 func _ready() -> void:
 	current = true
 
 func _process(delta: float) -> void:
-	# Q/E yaw
+	# Q/E yaw (keyboard should always work)
 	if Input.is_key_pressed(KEY_Q): yaw_deg -= keyboard_rotate_speed * delta
 	if Input.is_key_pressed(KEY_E): yaw_deg += keyboard_rotate_speed * delta
 
@@ -38,6 +38,14 @@ func _process(delta: float) -> void:
 	_update_transform()
 
 func _unhandled_input(event: InputEvent) -> void:
+	# If pointer is over any Control that doesn't IGNORE mouse, don't let the camera use the mouse.
+	# This blocks scroll zoom + drag rotate when hovering the upgrades window.
+	if _ui_pointer_blocks_mouse():
+		# ensure we don't keep rotating if the press happened over UI
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			_rotating = false
+		return
+
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			_rotating = event.pressed
@@ -50,6 +58,20 @@ func _unhandled_input(event: InputEvent) -> void:
 		yaw_deg   += event.relative.x * rotate_sensitivity
 		pitch_deg += event.relative.y * rotate_sensitivity
 
+func _ui_pointer_blocks_mouse() -> bool:
+	# Block when the pointer is over any visible Control that accepts mouse
+	var vp := get_viewport()
+	var c := vp.gui_get_hovered_control()
+	while c != null:
+		var ctrl := c as Control
+		if ctrl == null:
+			break
+		if ctrl.visible and ctrl.mouse_filter != Control.MOUSE_FILTER_IGNORE:
+			return true
+		c = ctrl.get_parent() as Control
+	return false
+
+
 func _pan_with_keyboard(delta: float) -> void:
 	var speed := pan_speed
 	if Input.is_key_pressed(KEY_SHIFT): speed *= pan_fast_mult
@@ -61,20 +83,17 @@ func _pan_with_keyboard(delta: float) -> void:
 	if Input.is_key_pressed(KEY_W): v.y += 1
 	if Input.is_key_pressed(KEY_A): v.x -= 1
 	if Input.is_key_pressed(KEY_D): v.x += 1
-	
 	# Arrows
 	if Input.is_key_pressed(KEY_DOWN): v.y -= 1
 	if Input.is_key_pressed(KEY_UP): v.y += 1
 	if Input.is_key_pressed(KEY_LEFT): v.x -= 1
 	if Input.is_key_pressed(KEY_RIGHT): v.x += 1
-
 	if v == Vector2.ZERO: return
 	v = v.normalized()
 
 	# Move in camera's local X/Z plane
 	var right := global_transform.basis.x; right.y = 0; right = right.normalized()
 	var fwd   := -global_transform.basis.z; fwd.y = 0;   fwd   = fwd.normalized()
-
 	_pan_offset += (right * v.x + fwd * v.y) * speed * delta
 
 func _apply_zoom(amount: float) -> void:
@@ -99,12 +118,10 @@ func _update_transform() -> void:
 	var center := _get_focus()
 	var yaw := deg_to_rad(yaw_deg)
 	var pitch := deg_to_rad(pitch_deg)
-
 	var dir := Vector3(
 		cos(pitch) * cos(yaw),
 		sin(pitch),
 		cos(pitch) * sin(yaw)
 	).normalized()
-
 	global_position = center - dir * distance
 	look_at(center, Vector3.UP)

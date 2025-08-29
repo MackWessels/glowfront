@@ -1,4 +1,3 @@
-# res://scripts/power_ups_hud.gd
 extends CanvasLayer
 
 @export var columns: int = 2
@@ -7,12 +6,16 @@ extends CanvasLayer
 @export var margin_bottom: int = 16
 @export var grid_h_separation: int = 6
 @export var grid_v_separation: int = 6
+@export var max_screen_height_ratio: float = 0.50  # HUD body height ≤ this fraction of screen
 
 const TAB_OFFENSE := 0
 const TAB_BASE := 1
 
 var _panel: Control
 var _tabs: TabContainer
+
+var _scroll_offense: ScrollContainer
+var _scroll_base: ScrollContainer
 var _grid_offense: GridContainer
 var _grid_base: GridContainer
 
@@ -32,17 +35,23 @@ func _ready() -> void:
 	_tabs.tab_alignment = TabBar.ALIGNMENT_LEFT
 	_panel.add_child(_tabs)
 
-	# Offense tab
+	# Offense tab (ScrollContainer -> Grid)
 	_grid_offense = _make_grid()
+	_scroll_offense = _make_scroller()
+	_scroll_offense.add_child(_grid_offense)
+
 	var offense_tab := MarginContainer.new()
-	offense_tab.add_child(_grid_offense)
+	offense_tab.add_child(_scroll_offense)
 	_tabs.add_child(offense_tab)
 	_tabs.set_tab_title(TAB_OFFENSE, "Offense")
 
-	# Base/Utility tab
+	# Base/Utility tab (ScrollContainer -> Grid)
 	_grid_base = _make_grid()
+	_scroll_base = _make_scroller()
+	_scroll_base.add_child(_grid_base)
+
 	var base_tab := MarginContainer.new()
-	base_tab.add_child(_grid_base)
+	base_tab.add_child(_scroll_base)
 	_tabs.add_child(base_tab)
 	_tabs.set_tab_title(TAB_BASE, "Base")
 
@@ -52,7 +61,10 @@ func _ready() -> void:
 
 	# Events
 	get_viewport().size_changed.connect(_layout_panel)
-	_tabs.tab_changed.connect(func(_i: int) -> void: _layout_panel())
+	_tabs.tab_changed.connect(func(_i: int) -> void:
+		_reset_scrolls()
+		_layout_panel()
+	)
 	if Economy.has_signal("balance_changed"):
 		Economy.balance_changed.connect(_on_balance_changed)
 	if PowerUps.has_signal("changed"):
@@ -67,7 +79,17 @@ func _make_grid() -> GridContainer:
 	g.columns = max(1, columns)
 	g.add_theme_constant_override("h_separation", grid_h_separation)
 	g.add_theme_constant_override("v_separation", grid_v_separation)
+	g.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	g.size_flags_vertical = Control.SIZE_FILL
 	return g
+
+func _make_scroller() -> ScrollContainer:
+	var s := ScrollContainer.new()
+	s.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	s.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_ALWAYS
+	s.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	return s
 
 # ---------- signals ----------
 func _on_balance_changed(_bal: int) -> void:
@@ -78,7 +100,7 @@ func _on_upgrade_purchased(_id: String, _lvl: int, _next_cost: int) -> void:
 
 # ---------- layout ----------
 func _layout_panel() -> void:
-	# Active grid drives size
+	# Active grid drives width/rows calc
 	var active_grid := (_grid_offense if _tabs.current_tab == TAB_OFFENSE else _grid_base)
 	var active_count: int = int(active_grid.get_child_count())
 
@@ -89,9 +111,9 @@ func _layout_panel() -> void:
 	if cols > 1:
 		width += float(cols - 1) * float(grid_h_separation)
 
-	var height: float = float(rows) * card_min_size.y
+	var content_h: float = float(rows) * card_min_size.y
 	if rows > 1:
-		height += float(rows - 1) * float(grid_v_separation)
+		content_h += float(rows - 1) * float(grid_v_separation)
 
 	# enforce per-card min size
 	for btn in _cards_offense.values():
@@ -99,14 +121,29 @@ func _layout_panel() -> void:
 	for btn in _cards_base.values():
 		(btn as Button).custom_minimum_size = card_min_size
 
-	_tabs.custom_minimum_size = Vector2(width, height + 28) # +tab bar height
+	# Visible body height is clamped; scrolling handles overflow
+	var vp: Vector2 = Vector2(get_viewport().get_visible_rect().size)
+	var max_body: float = clampf(vp.y * max_screen_height_ratio, card_min_size.y + 8.0, vp.y - float(margin_bottom) - 40.0)
+	var body_h: float = min(content_h, max_body)
+
+	_scroll_offense.custom_minimum_size = Vector2(width, body_h)
+	_scroll_base.custom_minimum_size    = Vector2(width, body_h)
+
+	# TabContainer height = body + tab bar height (~28px)
+	_tabs.custom_minimum_size = Vector2(width, body_h + 28.0)
 	_panel.custom_minimum_size = _tabs.custom_minimum_size
 	_panel.size = _tabs.custom_minimum_size
 
-	var vp: Vector2 = Vector2(get_viewport().get_visible_rect().size)
+	# Anchor bottom-left
 	var x: float = float(margin_left)
 	var y: float = vp.y - _panel.size.y - float(margin_bottom)
 	_panel.position = Vector2(x, y)
+
+func _reset_scrolls() -> void:
+	if _scroll_offense:
+		_scroll_offense.scroll_vertical = 0
+	if _scroll_base:
+		_scroll_base.scroll_vertical = 0
 
 # ---------- build & refresh ----------
 func _build_cards() -> void:
@@ -187,28 +224,30 @@ func _refresh_card(id: String) -> void:
 
 # ---------- category / naming ----------
 func _category_for(id: String) -> int:
-	# Offense: turret_* and crit_*; Base: spawner_* and base_* (health, regen)
+	# Offense: turret_* and crit_*; Base: spawner_*, base_*, and board_* (expansion upgrades)
 	if id.begins_with("turret_") or id.begins_with("crit_"):
 		return TAB_OFFENSE
-	if id.begins_with("spawner_") or id.begins_with("base_"):
+	if id.begins_with("spawner_") or id.begins_with("base_") or id.begins_with("board_"):
 		return TAB_BASE
 	# Fallback: treat unknowns as Offense (keeps them visible)
 	return TAB_OFFENSE
 
 func _pretty_name(id: String) -> String:
 	match id:
-		# Offense
 		"turret_damage":     return "Damage"
 		"turret_rate":       return "Attack Speed"
 		"turret_range":      return "Range"
 		"crit_chance":       return "Crit Chance"
 		"crit_mult":         return "Crit Damage"
 		"turret_multishot":  return "Multi-Shot"
-		# Base
 		"base_max_hp":       return "Max Health"
 		"base_regen":        return "Health Regen"
 		"spawner_health":    return "Spawner Health"
+		"board_add_left":    return "Board Add Right"
+		"board_add_right":   return "Board Add Left"
+		"board_push_back":   return "Board Push Back"
 		_:                   return id.capitalize()
+
 
 # ---------- values / formatting ----------
 func _value_line(id: String, current_level: int) -> String:
@@ -259,11 +298,9 @@ func _value_line(id: String, current_level: int) -> String:
 			var nxt_rem: int = int(round(nxt_ms - float(nxt_base - 1) * 100.0))
 			if nxt_rem < 0: nxt_rem = 0
 
-			# Example: "2 +70% → 2 +90%" (guaranteed 2 targets, 70% for a 3rd)
 			return "%d +%d%% → %d +%d%%" % [cur_base, cur_rem, nxt_base, nxt_rem]
 
 		"base_max_hp":
-			# Use PowerUps helper; works even if Health autoload isn't passed in.
 			var hinfo: Dictionary = PowerUps.health_max_info()
 			var cur_m: int = int(hinfo.get("current_max_hp", 0))
 			var nxt_m: int = int(hinfo.get("next_max_hp", 0))
@@ -280,11 +317,14 @@ func _value_line(id: String, current_level: int) -> String:
 			return "Lv " + str(current_level)
 
 		"spawner_health":
-			# Kept for compatibility if you still use it.
 			if PowerUps.has_method("spawner_health_value") and PowerUps.has_method("next_spawner_health_value"):
 				var cur_h: int = int(PowerUps.spawner_health_value())
 				var nxt_h: int = int(PowerUps.next_spawner_health_value())
 				return "%d → %d" % [cur_h, nxt_h]
+			return "Lv " + str(current_level)
+
+		# Board expansions: show level by default (count of purchased layers)
+		"board_add_left", "board_add_right", "board_push_back":
 			return "Lv " + str(current_level)
 
 		_:

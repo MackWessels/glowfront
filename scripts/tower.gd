@@ -215,7 +215,7 @@ func _compute_multishot_count() -> int:
 		pct = maxf(0.0, PowerUps.multishot_percent_value())
 
 	# 100% guarantees +1 target; overflow is chance for one more, etc.
-	# e.g., 170% => base 1 + 1 guaranteed = 2, plus 70% chance for 3rd.
+	# 170% => base 1 + 1 guaranteed = 2, plus 70% chance for 3rd.
 	var extra_guaranteed: int = int(floor(pct / 100.0))
 	var remainder: float = pct - float(extra_guaranteed) * 100.0
 
@@ -230,7 +230,7 @@ func _targets_sorted_by_distance() -> Array[Node3D]:
 	for e in targets_in_range:
 		if e != null and is_instance_valid(e):
 			arr.append(e)
-	# Sort by distance ascending (closest first) — Godot 4 expects a single Callable
+	# Sort by distance ascending (closest first)
 	arr.sort_custom(Callable(self, "_cmp_by_distance"))
 	return arr
 
@@ -306,7 +306,7 @@ func fire() -> void:
 
 	can_fire = false
 
-	# Decide how many enemies to hit this shot; clamp to what's actually in range.
+	# Decide how many enemies to hit this shot
 	var want: int = _compute_multishot_count()
 	var victims: Array[Node3D] = _select_victims_widest(want)
 	if victims.is_empty():

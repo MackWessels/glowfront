@@ -40,7 +40,12 @@ func _try_spend(cost: int, reason: String = "") -> bool:
 
 	# Base / utility
 	"base_max_hp":       { "cost_sequence": [20, 25, 32, 40, 49, 59, 70, 82, 95, 109], "max_level": 0 },
-	"base_regen":        { "cost_sequence": [15, 20, 26, 33, 41, 50, 60, 72, 85, 99],  "max_level": 0 }
+	"base_regen":        { "cost_sequence": [15, 20, 26, 33, 41, 50, 60, 72, 85, 99],  "max_level": 0 },
+	# Map expansions
+	"board_add_left":  { "cost_sequence": [40, 55, 70, 90, 115, 145], "max_level": 0 },
+	"board_add_right": { "cost_sequence": [40, 55, 70, 90, 115, 145], "max_level": 0 },
+	"board_push_back": { "cost_sequence": [60, 80, 105, 135, 170, 210], "max_level": 0 }
+
 }
 
 # Attack speed (global multiplier on interval; <1 = faster)
@@ -71,7 +76,7 @@ func _try_spend(cost: int, reason: String = "") -> bool:
 @export var multishot_base_percent: float = 0.0
 @export var multishot_percent_per_step: float = 20.0
 
-# Meta (shards) – keep damage + health; (skip multishot for now, easy to add later)
+# Meta (shards) – keep damage + health; 
 const _SHARDS_COSTS: Dictionary = {
 	"turret_damage": [30, 55, 88, 128, 177],
 	"base_max_hp":   [25, 45, 72, 106, 147],
