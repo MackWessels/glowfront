@@ -21,8 +21,8 @@ extends Node3D
 @export var wall_height: float = 2.5
 
 # Keep: wall debug meshes
-var _debug_mesh_enabled := true
-@export var render_debug_wall_mesh := true:
+var _debug_mesh_enabled := false
+@export var render_debug_wall_mesh := false:
 	set(value):
 		_debug_mesh_enabled = value
 		if is_inside_tree() and use_bounds:

@@ -9,3 +9,5 @@ res://scenes/main_menu.tscn
 res://scenes/wall.tscn
 res://scenes/tower.tscn
 res://scenes/goal.tscn
+res://scripts/camera_control.gd
+res://scripts/tile_board.gd

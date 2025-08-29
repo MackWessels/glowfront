@@ -1,47 +1,61 @@
 extends Camera3D
 
-@export var focus_node: NodePath                 # e.g., TileBoard or a Pivot
-@export var focus_point: Vector3 = Vector3.ZERO  # used if focus_node is empty
+# ---- TileBoard hookup ----
+@export var tile_board_path: NodePath
+@export var use_goal_start: bool = true
 
-# Orbit state
-@export var distance: float = 20.0
-@export var min_distance: float = 6.0
+# ---- Startup framing: above goal, looking INTO the board ----
+@export var start_back_distance: float = 6.0     # how far BEHIND the goal (along board direction)
+@export var start_hover: float = 12.0            # height above goal
+@export var start_pitch_bias_deg: float = -10.0  # extra tilt downward (negative looks down)
+
+# Where to aim the camera initially
+@export_enum("center", "ahead_tiles") var look_target: String = "ahead_tiles"
+@export var aim_ahead_tiles: float = 2.0         # used if look_target = "ahead_tiles"
+
+# Zoom preferences for the initial pose
+@export var start_distance_override: float = -1.0 # if > 0, use exactly this distance
+@export var start_zoom_scale: float = 0.75       # otherwise scale computed distance (1.05 = tiny zoom out)
+
+# ---- Orbit state ----
+@export var focus_point: Vector3 = Vector3.ZERO  # orbit this point (no node needed)
+@export var distance: float = 12.0
+@export var min_distance: float = 4.0
 @export var max_distance: float = 80.0
 @export var yaw_deg: float = 45.0
 @export var pitch_deg: float = -45.0
 @export var min_pitch_deg: float = -85.0
 @export var max_pitch_deg: float = -10.0
 
-# Feel
+# ---- Feel ----
 @export var rotate_sensitivity: float = 0.3
 @export var zoom_step: float = 2.0
 @export var keyboard_rotate_speed: float = 90.0
 
-# Panning
+# ---- Panning ----
 @export var pan_speed: float = 20.0
 @export var pan_fast_mult: float = 2.5
 @export var pan_slow_mult: float = 0.5
 
 var _rotating: bool = false
 var _pan_offset: Vector3 = Vector3.ZERO
+var _snapped_once: bool = false
 
 func _ready() -> void:
 	current = true
+	if use_goal_start:
+		call_deferred("_try_snap_from_goal")
 
 func _process(delta: float) -> void:
-	# Q/E yaw (keyboard should always work)
 	if Input.is_key_pressed(KEY_Q): yaw_deg -= keyboard_rotate_speed * delta
 	if Input.is_key_pressed(KEY_E): yaw_deg += keyboard_rotate_speed * delta
-
 	_pan_with_keyboard(delta)
 	_clamp_state()
 	_update_transform()
 
 func _unhandled_input(event: InputEvent) -> void:
-	# If pointer is over any Control that doesn't IGNORE mouse, don't let the camera use the mouse.
-	# This blocks scroll zoom + drag rotate when hovering the upgrades window.
+	# Block mouse when over UI that accepts it
 	if _ui_pointer_blocks_mouse():
-		# ensure we don't keep rotating if the press happened over UI
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 			_rotating = false
 		return
@@ -53,66 +67,54 @@ func _unhandled_input(event: InputEvent) -> void:
 			_apply_zoom(-zoom_step)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 			_apply_zoom(zoom_step)
-
 	elif event is InputEventMouseMotion and _rotating:
 		yaw_deg   += event.relative.x * rotate_sensitivity
 		pitch_deg += event.relative.y * rotate_sensitivity
 
 func _ui_pointer_blocks_mouse() -> bool:
-	# Block when the pointer is over any visible Control that accepts mouse
 	var vp := get_viewport()
 	var c := vp.gui_get_hovered_control()
 	while c != null:
 		var ctrl := c as Control
-		if ctrl == null:
-			break
+		if ctrl == null: break
 		if ctrl.visible and ctrl.mouse_filter != Control.MOUSE_FILTER_IGNORE:
 			return true
 		c = ctrl.get_parent() as Control
 	return false
 
-
 func _pan_with_keyboard(delta: float) -> void:
-	var speed := pan_speed
+	var speed: float = pan_speed
 	if Input.is_key_pressed(KEY_SHIFT): speed *= pan_fast_mult
 	elif Input.is_key_pressed(KEY_CTRL): speed *= pan_slow_mult
 
 	var v := Vector2.ZERO
-	# WASD
 	if Input.is_key_pressed(KEY_S): v.y -= 1
 	if Input.is_key_pressed(KEY_W): v.y += 1
 	if Input.is_key_pressed(KEY_A): v.x -= 1
 	if Input.is_key_pressed(KEY_D): v.x += 1
-	# Arrows
 	if Input.is_key_pressed(KEY_DOWN): v.y -= 1
-	if Input.is_key_pressed(KEY_UP): v.y += 1
+	if Input.is_key_pressed(KEY_UP):   v.y += 1
 	if Input.is_key_pressed(KEY_LEFT): v.x -= 1
-	if Input.is_key_pressed(KEY_RIGHT): v.x += 1
+	if Input.is_key_pressed(KEY_RIGHT):v.x += 1
 	if v == Vector2.ZERO: return
 	v = v.normalized()
 
-	# Move in camera's local X/Z plane
-	var right := global_transform.basis.x; right.y = 0; right = right.normalized()
-	var fwd   := -global_transform.basis.z; fwd.y = 0;   fwd   = fwd.normalized()
+	var right := global_transform.basis.x; right.y = 0.0; right = right.normalized()
+	var fwd   := -global_transform.basis.z; fwd.y = 0.0;   fwd   = fwd.normalized()
 	_pan_offset += (right * v.x + fwd * v.y) * speed * delta
 
 func _apply_zoom(amount: float) -> void:
 	if projection == PROJECTION_ORTHOGONAL:
-		size = clamp(size + amount * 0.25, 1.0, 200.0)
-	distance += amount
+		size = clampf(size + amount * 0.25, 1.0, 200.0)
+	distance = clampf(distance + amount, min_distance, max_distance)
 
 func _clamp_state() -> void:
-	pitch_deg = clamp(pitch_deg, min_pitch_deg, max_pitch_deg)
-	distance  = clamp(distance,  min_distance, max_distance)
+	pitch_deg = clampf(pitch_deg, min_pitch_deg, max_pitch_deg)
+	distance  = clampf(distance,  min_distance, max_distance)
 	yaw_deg   = fmod(yaw_deg, 360.0)
 
 func _get_focus() -> Vector3:
-	var base := focus_point
-	if focus_node != NodePath():
-		var n := get_node_or_null(focus_node)
-		if n is Node3D:
-			base = (n as Node3D).global_position
-	return base + _pan_offset
+	return focus_point + _pan_offset
 
 func _update_transform() -> void:
 	var center := _get_focus()
@@ -125,3 +127,86 @@ func _update_transform() -> void:
 	).normalized()
 	global_position = center - dir * distance
 	look_at(center, Vector3.UP)
+
+# ---------- Startup snapping (anchor to goal, look into board) ----------
+
+func _try_snap_from_goal() -> void:
+	if _snapped_once: return
+	var tb := _get_tileboard()
+	if tb == null:
+		call_deferred("_try_snap_from_goal")
+		return
+
+	if not (tb.has_method("get_goal_position") and tb.has_method("get_spawn_position")):
+		if tb.has_signal("global_path_changed"):
+			tb.connect("global_path_changed", Callable(self, "_on_tileboard_ready_once"), CONNECT_ONE_SHOT)
+		return
+
+	_snap_goal_over_board(tb)
+	_snapped_once = true
+
+func _on_tileboard_ready_once() -> void:
+	if _snapped_once: return
+	var tb := _get_tileboard()
+	if tb and tb.has_method("get_goal_position") and tb.has_method("get_spawn_position"):
+		_snap_goal_over_board(tb)
+		_snapped_once = true
+
+func _snap_goal_over_board(tb: Node) -> void:
+	var goal_pos: Vector3 = Vector3(tb.call("get_goal_position"))
+	var spawn_pos: Vector3 = Vector3(tb.call("get_spawn_position")) # fallback aid
+
+	# Board center in world space
+	var sx: int = int(tb.get("board_size_x"))
+	var sz: int = int(tb.get("board_size_z"))
+	var mid := Vector2i(sx >> 1, sz >> 1)
+	var board_center: Vector3 = Vector3(tb.call("cell_to_world", mid))
+
+	# Direction INTO the board from the goal (flattened)
+	var into_board: Vector3 = board_center - goal_pos
+	into_board.y = 0.0
+	if into_board.length_squared() < 1e-6:
+		into_board = spawn_pos - goal_pos
+		into_board.y = 0.0
+	if into_board.length_squared() < 1e-6:
+		into_board = Vector3(1, 0, 0)
+	into_board = into_board.normalized()
+
+	# Place camera behind the goal and above it
+	var cam_pos: Vector3 = goal_pos - into_board * start_back_distance + Vector3.UP * start_hover
+
+	# Choose look target: a bit into the board, or the true center
+	var center: Vector3
+	if look_target == "center":
+		center = board_center
+	else:
+		var tile_size: float = float(tb.get("tile_size"))
+		center = goal_pos + into_board * (tile_size * aim_ahead_tiles)
+
+	# Convert to orbit params (yaw/pitch/distance)
+	var diff: Vector3 = center - cam_pos
+	var base_dist: float = maxf(diff.length(), 0.001)
+
+	yaw_deg = rad_to_deg(atan2(diff.z, diff.x))
+	var y_ratio: float = diff.y / base_dist
+	y_ratio = clampf(y_ratio, -1.0, 1.0)
+	pitch_deg = rad_to_deg(asin(y_ratio)) + start_pitch_bias_deg
+
+	var desired_distance: float = clampf(base_dist, min_distance, max_distance)
+	if start_distance_override > 0.0:
+		desired_distance = clampf(start_distance_override, min_distance, max_distance)
+	else:
+		desired_distance = clampf(desired_distance * start_zoom_scale, min_distance, max_distance)
+	distance = desired_distance
+
+	focus_point = center
+	_pan_offset = Vector3.ZERO
+	_clamp_state()
+	_update_transform()
+
+func _get_tileboard() -> Node:
+	if tile_board_path != NodePath():
+		var n := get_node_or_null(tile_board_path)
+		if n != null: return n
+	var list := get_tree().get_nodes_in_group("TileBoard")
+	return list[0] if list.size() > 0 else null
