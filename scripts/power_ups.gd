@@ -348,3 +348,33 @@ func modified_cost(action: String, base: int) -> int: return base
 func _round_to(value: float, step: int) -> int:
 	if step <= 1: return int(round(value))
 	return int(round(value / float(step))) * step
+
+
+# =================================================================
+# Map-upgrade "applied" overrides (driven by the HUD +/- controls)
+# =================================================================
+
+# id -> int (how many of this upgrade are currently *applied* to the board)
+var _applied_override: Dictionary = {}
+
+# Set one id
+func set_applied_override(id: String, value: int) -> void:
+	_applied_override[id] = max(0, value)
+
+# Set many at once (id -> int)
+func set_applied_override_map(m: Dictionary) -> void:
+	for k in m.keys():
+		_applied_override[String(k)] = int(m[k])
+
+
+func applied_for(id: String) -> int:
+	if _applied_override.has(id):
+		return int(_applied_override[id])
+
+	if Shards and Shards.has_method("get_meta_applied"):
+		return int(Shards.get_meta_applied(id))
+
+	if Shards and Shards.has_method("get_meta_level"):
+		return int(Shards.get_meta_level(id))
+
+	return 0

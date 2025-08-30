@@ -6,7 +6,7 @@ signal meta_changed(id: String, new_level: int)
 const SAVE_PATH := "user://shards.cfg"
 const CFG_SECTION := "meta"
 
-var _balance: int = 0
+var _balance: int = 50000
 var _rng := RandomNumberGenerator.new()
 
 func _ready() -> void:

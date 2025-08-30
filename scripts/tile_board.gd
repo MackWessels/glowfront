@@ -84,17 +84,24 @@ const EPS := 0.0001
 # ---------------- Lifecycle ----------------
 func _ready() -> void:
 	add_to_group("TileBoard")
+
+	# 1) Base board only (no pre-sizing)
 	generate_board()
 
+	# 2) Init grid helpers
 	var origin_tile := tiles.get(Vector2i(0, 0), null) as Node3D
 	_grid_origin = (origin_tile.global_position if origin_tile != null else global_position)
 	_step = tile_size
 
-	# Portals: default spawner at left, goal at right
+	# 3) Place portals for the base board once (default: spawner=left, goal=right)
 	position_portal(goal_node, "right")
 	position_portal(spawner_node, "left")
 
+	# 4) Put spawner slightly offboard (based on current spawn opening)
 	_place_spawner_offboard_strip()
+
+	# 5) NOW apply meta expansions exactly like in-run purchases
+	_apply_initial_board_from_powerups()
 
 	if use_bounds:
 		_create_bounds()
@@ -107,6 +114,7 @@ func _ready() -> void:
 
 	# >>> Autoload-safe PowerUps hookup (deferred) <<<
 	call_deferred("_connect_powerups")
+
 
 func _physics_process(delta: float) -> void:
 	if _pending_builds.size() > 0:
@@ -1127,7 +1135,6 @@ func _translate_live_enemies(delta_world: Vector3, dx: int, dz: int) -> void:
 		if n3 == null or not is_instance_valid(n3):
 			continue
 
-		# Keep the physical position
 		if delta_world != Vector3.ZERO:
 			n3.global_position += delta_world
 			for k in ["target_world", "target_pos", "next_wp"]:
@@ -1140,3 +1147,49 @@ func _translate_live_enemies(delta_world: Vector3, dx: int, dz: int) -> void:
 			if typeof(cvar) == TYPE_VECTOR2I:
 				var c: Vector2i = cvar
 				n3.set("current_cell", Vector2i(c.x + dx, c.y + dz))
+
+
+# ---- Shards Map meta: apply like runtime upgrades ----
+func _apply_map_meta_expansions() -> void:
+	var left_rows  := _shard_meta_level_safe("board_add_left")
+	var right_rows := _shard_meta_level_safe("board_add_right")
+	var push_cols  := _shard_meta_level_safe("board_push_back")
+
+	for i in left_rows:
+		_add_row_at_top()
+
+	for i in right_rows:
+		_add_row_at_bottom()
+
+	for i in push_cols:
+		_add_column_at_spawner_edge()
+
+func _shard_meta_level_safe(id: String) -> int:
+	var s := get_node_or_null("/root/Shards")
+	if s and s.has_method("get_meta_level"):
+		return int(s.call("get_meta_level", id))
+	# Back-compat if meta is proxied on PowerUps
+	var pu := get_node_or_null("/root/PowerUps")
+	if pu and pu.has_method("meta_level"):
+		return int(pu.call("meta_level", id))
+	return 0
+
+
+# Apply initial map size from PowerUps' *applied* values
+func _apply_initial_board_from_powerups() -> void:
+	var pu := get_node_or_null("/root/PowerUps")
+	if pu == null:
+		return
+
+	# Read the counts the player actually wants active
+	var add_left  := int(pu.call("applied_for", "board_add_left"))     # TOP row in your mapping
+	var add_right := int(pu.call("applied_for", "board_add_right"))    # BOTTOM row
+	var push_back := int(pu.call("applied_for", "board_push_back"))    # COLUMN at spawner edge
+
+	# Grow the board to match those applied counts
+	for i in add_left:
+		_add_row_at_top()
+	for i in add_right:
+		_add_row_at_bottom()
+	for i in push_back:
+		_add_column_at_spawner_edge()
