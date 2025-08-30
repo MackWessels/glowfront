@@ -71,7 +71,8 @@ func _process(delta: float) -> void:
 func _try_connect_powerups() -> void:
 	var pu: Node = get_node_or_null("/root/PowerUps")
 	if pu != null and pu.has_signal("changed"):
-		pu.changed.connect(_on_powerups_changed)
+		if not pu.is_connected("changed", Callable(self, "_on_powerups_changed")):
+			pu.changed.connect(_on_powerups_changed)
 
 func _on_powerups_changed() -> void:
 	var old_max: int = max_hp
@@ -92,10 +93,13 @@ func _on_powerups_changed() -> void:
 		_log("powerup -> max %d→%d regen %.2f→%.2f hp now %d/%d (Δmax=%d)"
 			% [old_max, max_hp, old_regen, _regen, int(ceil(hp)), max_hp, delta_max])
 
+# Prefer PowerUps.total_level(); fall back to legacy helpers if present
 func _lvl(id: String) -> int:
 	var pu: Node = get_node_or_null("/root/PowerUps")
 	if pu == null:
 		return 0
+	if pu.has_method("total_level"):
+		return int(pu.call("total_level", id))
 	if pu.has_method("level"):
 		return int(pu.call("level", id))
 	if pu.has_method("get_level"):
@@ -107,8 +111,8 @@ func _lvl(id: String) -> int:
 func _recompute_from_powerups() -> void:
 	var hp_lvl: int = _lvl("base_max_hp")
 	var regen_lvl: int = _lvl("base_regen")
-	max_hp = max(1, base_max_hp + hp_lvl * hp_per_level)
-	_regen = base_regen_per_sec + regen_lvl * regen_per_level
+	max_hp = maxi(1, base_max_hp + hp_lvl * hp_per_level)
+	_regen = base_regen_per_sec + regen_per_level * float(regen_lvl)
 
 func _log(msg: String) -> void:
 	print("[Health] ", msg)

@@ -22,7 +22,7 @@ class_name EnemySpawner
 
 # ---------------- Waves ----------------
 @export var wave_index: int = 1
-@export var wave_time_sec: float = 18.0
+@export var wave_time_sec: float = 5.0
 @export var wave_cooldown_sec: float = 3.0
 @export var base_wave_count: int = 10
 @export var per_wave_count: int = 2
