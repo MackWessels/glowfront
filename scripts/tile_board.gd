@@ -1193,3 +1193,10 @@ func _apply_initial_board_from_powerups() -> void:
 		_add_row_at_bottom()
 	for i in push_back:
 		_add_column_at_spawner_edge()
+
+func free_tile(cell: Vector2i) -> void:
+	var t: Node = tiles.get(cell, null)
+	if t and t.has_method("repair_tile"):
+		t.call("repair_tile")
+	_recompute_flow()
+	_emit_path_changed()

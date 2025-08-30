@@ -130,20 +130,35 @@ func apply_stats(s: Dictionary) -> void:
 
 
 # ---------------- Combat ----------------
+signal damaged(by, amount: int, killed: bool)
+
 func take_damage(ctx: Dictionary) -> void:
-	var base: int = int(ctx.get("base", 0))
-	var flat: int = int(ctx.get("flat_bonus", 0))
-	var mult: float = float(ctx.get("mult", 1.0))
-	var crit_mult: float = float(ctx.get("crit_mult", 2.0))
-	var crit_chance: float = float(ctx.get("crit_chance", 0.0))
-	if crit_chance > 0.0 and randf() < crit_chance:
-		mult *= crit_mult
-	var dmg: int = int(max(0.0, round(float(base + flat) * mult)))
+	var by: Node = ctx.get("by", null) as Node
+
+	# Prefer precomputed damage 
+	var dmg: int = -1
+	if ctx.has("final"):
+		dmg = int(ctx["final"])
+	else:
+		# Back-compat path (old callers): compute here.
+		var base: int = int(ctx.get("base", 0))
+		var flat: int = int(ctx.get("flat_bonus", 0))
+		var mult: float = float(ctx.get("mult", 1.0))
+		var crit_mult: float = float(ctx.get("crit_mult", 2.0))
+		var crit_chance: float = float(ctx.get("crit_chance", 0.0))
+		if crit_chance > 0.0 and randf() < crit_chance:
+			mult *= crit_mult
+		dmg = int(max(0.0, round(float(base + flat) * mult)))
+
 	if dmg <= 0:
 		return
+
 	health -= dmg
-	if health <= 0:
+	var killed := (health <= 0)
+	emit_signal("damaged", by, dmg, killed)
+	if killed:
 		_die(true)
+
 
 func _die(killed: bool) -> void:
 	if _dead:

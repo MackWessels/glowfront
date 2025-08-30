@@ -349,11 +349,6 @@ func _round_to(value: float, step: int) -> int:
 	if step <= 1: return int(round(value))
 	return int(round(value / float(step))) * step
 
-
-# =================================================================
-# Map-upgrade "applied" overrides (driven by the HUD +/- controls)
-# =================================================================
-
 # id -> int (how many of this upgrade are currently *applied* to the board)
 var _applied_override: Dictionary = {}
 
