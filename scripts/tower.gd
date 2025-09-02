@@ -1,17 +1,23 @@
 extends Node3D
 #
-# Turret: hitscan + right-click stats + selling + exact telemetry + range ring
+# Turret: hitscan BLACK laser + right-click stats + selling + telemetry + range ring
 #
 var _stats_layer: CanvasLayer = null
 
 # ---------- Visuals ----------
-@export var projectile_scene: PackedScene
-@export var tracer_speed: float = 12.0
+@export var projectile_scene: PackedScene  # kept for compatibility; unused
+@export var tracer_speed: float = 12.0     # unused for laser
 @export var max_range: float = 40.0
 
+# Laser settings
+@export var laser_width: float = 0.12
+@export var laser_duration: float = 0.07
+@export var laser_color_core: Color = Color(0, 0, 0, 0.95) # black, mostly opaque
+@export var laser_color_glow: Color = Color(0, 0, 0, 0.65) # softer outer band
+
 # ---------- Base combat ----------
-@export var base_damage: int = 1                  # used if PowerUps missing
-@export var base_fire_rate: float = 1.0           # seconds per shot (interval)
+@export var base_damage: int = 1
+@export var base_fire_rate: float = 1.0   # seconds per shot (interval)
 
 # ---------- Local fire-rate upgrades (multiplies interval) ----------
 @export var rate_mult_per_level: float = 0.90
@@ -19,7 +25,7 @@ var _stats_layer: CanvasLayer = null
 var rate_level: int = 0
 
 # ---------- Local range upgrades (adds units) ----------
-@export var base_acquire_range: float = 0.0       # 0 => auto-detect from shape or 12
+@export var base_acquire_range: float = 0.0
 @export var range_per_level: float = 2.0
 @export var range_level_max: int = 10
 var range_level: int = 0
@@ -27,13 +33,13 @@ var range_level: int = 0
 # ---------- Build / minerals ----------
 @export var build_cost: int = 10
 @export var minerals_path: NodePath
-@export var sell_refund_percent: int = 60         # refund on sell (local spend only)
+@export var sell_refund_percent: int = 60
 var _minerals: Node = null
 signal build_paid(cost: int)
 signal build_denied(cost: int)
 signal upgraded(kind: String, new_level: int, cost: int)
 
-# ---------- TileBoard context (to free the cell on sell) ----------
+# ---------- TileBoard context ----------
 @export var tile_board_path: NodePath
 var _tile_board: Node = null
 var _tile_cell: Vector2i = Vector2i(-9999, -9999)
@@ -54,15 +60,15 @@ var targets_in_range: Array[Node3D] = []
 var _anim: AnimationPlayer = null
 var _muzzle_particles: Node = null
 
-# ---------- Derived stats (live) ----------
+# ---------- Derived stats ----------
 var _current_damage: int = 1
-var _current_fire_rate: float = 1.0        # seconds between shots
+var _current_fire_rate: float = 1.0
 var _current_acquire_range: float = 12.0
 const _FIRE_RATE_MIN: float = 0.05
 var _range_shapes: Array[CollisionShape3D] = []
 
 # ---------- Telemetry ----------
-var _spent_local: int = 0              # build + local upgrades (for refund)
+var _spent_local: int = 0
 var _lifetime_s: float = 0.0
 var _shots_fired: int = 0
 var _hits_landed: int = 0
@@ -74,10 +80,10 @@ var _stats_window: AcceptDialog = null
 var _stats_label: Label = null
 var _ui_refresh_accum: float = 0.0
 
-# ---------- Range ring (visualize current acquire range) ----------
+# ---------- Range ring ----------
 @export var range_ring_color: Color = Color(0.25, 0.9, 1.0, 0.35)
-@export var range_ring_thickness: float = 0.15     # world units (outer - inner)
-@export var range_ring_height: float = 0.02        # Y offset so it doesn’t z-fight
+@export var range_ring_thickness: float = 0.15
+@export var range_ring_height: float = 0.02
 var _range_ring: MeshInstance3D = null
 
 # =========================================================
@@ -114,7 +120,10 @@ func _ready() -> void:
 	_gather_range_shapes()
 	if base_acquire_range <= 0.0:
 		var detected := _detect_initial_range()
-		base_acquire_range = (detected if detected > 0.0 else 12.0)
+		if detected > 0.0:
+			base_acquire_range = detected
+		else:
+			base_acquire_range = 12.0
 
 	if PowerUps != null and PowerUps.has_signal("changed"):
 		PowerUps.changed.connect(_recompute_stats)
@@ -122,7 +131,7 @@ func _ready() -> void:
 	_recompute_stats()
 
 # =========================================================
-# Process
+# Process (aim only when ready; fire immediately after aim)
 # =========================================================
 func _process(dt: float) -> void:
 	_lifetime_s += dt
@@ -140,19 +149,19 @@ func _process(dt: float) -> void:
 		if target != null:
 			_connect_target_signals(target)
 
-	if target != null and is_instance_valid(target):
-		var turret_pos: Vector3 = Turret.global_position
-		var target_pos: Vector3 = target.global_position
-		target_pos.y = turret_pos.y
-		Turret.look_at(target_pos, Vector3.UP)
-		if can_fire:
-			fire()
+	# Aim only when ready to shoot (prevents pointing at someone we won't fire at)
+	if target != null and is_instance_valid(target) and can_fire:
+		var tpos: Vector3 = Turret.global_position
+		var pos: Vector3 = target.global_position
+		pos.y = tpos.y
+		Turret.look_at(pos, Vector3.UP)
+		fire()
 
 	if _stats_window != null and _stats_window.visible:
 		_ui_refresh_accum += dt
-		if _ui_refresh_accum > 0.25:
-			_ui_refresh_accum = 0.0
-			_refresh_stats_text()
+	if _ui_refresh_accum > 0.25:
+		_ui_refresh_accum = 0.0
+		_refresh_stats_text()
 
 # =========================================================
 # Economy helpers
@@ -251,7 +260,6 @@ func upgrade_range() -> bool:
 	return true
 
 func upgrade_damage() -> bool:
-	# Global, via PowerUps (not refunded on sell)
 	if PowerUps != null and PowerUps.purchase("turret_damage"):
 		_recompute_stats()
 		upgraded.emit("damage", 0, 0)
@@ -259,8 +267,8 @@ func upgrade_damage() -> bool:
 	return false
 
 func _scaled_cost(base_cost: int, scale: float, level: int) -> int:
-	var c := float(base_cost) * pow(max(1.0, scale), max(0, level))
-	return int(round(max(1.0, c)))
+	var c := float(base_cost) * pow(maxf(1.0, scale), max(0, level))
+	return int(round(maxf(1.0, c)))
 
 # =========================================================
 # Derived stats
@@ -273,21 +281,20 @@ func _recompute_stats() -> void:
 		_current_damage = base_damage
 
 	# Fire interval = base * local * global, clamped
-	var local_mult := pow(max(0.01, rate_mult_per_level), rate_level)
+	var local_mult := pow(maxf(0.01, rate_mult_per_level), rate_level)
 	var global_mult := 1.0
 	if PowerUps != null and PowerUps.has_method("turret_rate_mult"):
 		global_mult = maxf(0.01, PowerUps.turret_rate_mult())
-	_current_fire_rate = clamp(base_fire_rate * local_mult * global_mult, _FIRE_RATE_MIN, 999.0)
+	_current_fire_rate = clampf(base_fire_rate * local_mult * global_mult, _FIRE_RATE_MIN, 999.0)
 
-	# Acquire range = base + local + global
+	# Acquire range
 	var local_add := range_per_level * float(range_level)
 	var global_add := 0.0
 	if PowerUps != null and PowerUps.has_method("turret_range_bonus"):
 		global_add = PowerUps.turret_range_bonus()
-	_current_acquire_range = max(0.5, base_acquire_range + local_add + global_add)
+	_current_acquire_range = maxf(0.5, base_acquire_range + local_add + global_add)
 	_apply_range_to_area(_current_acquire_range)
 
-	# If the stats panel is open, keep the visual ring in sync
 	if _stats_window != null and _stats_window.visible:
 		_update_range_ring()
 
@@ -316,7 +323,7 @@ func _roll_final_damage_for_shot() -> int:
 			crit_mul = maxf(1.0, PowerUps.crit_mult_value())
 	if randf() < crit_ch:
 		total *= crit_mul
-	return int(max(0.0, round(total)))
+	return int(maxf(0.0, round(total)))
 
 func _targets_sorted_by_distance() -> Array[Node3D]:
 	var arr: Array[Node3D] = []
@@ -336,7 +343,7 @@ func _select_victims_widest(count: int) -> Array[Node3D]:
 	var sorted: Array[Node3D] = _targets_sorted_by_distance()
 	var n: int = min(count, sorted.size())
 	var victims: Array[Node3D] = []
-	for i in n:
+	for i in range(n):
 		victims.append(sorted[i])
 	return victims
 
@@ -368,7 +375,6 @@ func _on_clickbody_input(_camera: Node, event: InputEvent, _pos: Vector3, _norm:
 			dlg.hide()
 		else:
 			_refresh_stats_text()
-			# clamp to viewport bounds then show centered
 			var vp := get_viewport().get_visible_rect().size
 			dlg.size = dlg.size.clamp(Vector2i(320, 220), Vector2i(vp.x - 80, vp.y - 80))
 			dlg.popup_centered()
@@ -388,16 +394,30 @@ func _select_target() -> Node3D:
 			best = e
 	return best
 
+func _current_valid_target() -> Node3D:
+	if target != null and is_instance_valid(target) and targets_in_range.has(target):
+		return target
+	return _select_target()
+
 func fire() -> void:
-	if target == null or not is_instance_valid(target):
+	# Lock a primary target for this shot (ensures we shoot what we're aiming at)
+	var primary: Node3D = _current_valid_target()
+	if primary == null:
 		return
 	can_fire = false
 
+	# Re-aim at the primary we will actually shoot (belt-and-suspenders)
+	var turret_pos: Vector3 = Turret.global_position
+	var aim_pos: Vector3 = primary.global_position
+	aim_pos.y = turret_pos.y
+	Turret.look_at(aim_pos, Vector3.UP)
+
+	# Build victims list, force primary first
 	var want: int = _compute_multishot_count()
 	var victims: Array[Node3D] = _select_victims_widest(want)
-	if victims.is_empty():
-		can_fire = true
-		return
+	if victims.has(primary):
+		victims.erase(primary)
+	victims.insert(0, primary)
 
 	var from: Vector3 = MuzzlePoint.global_position
 	var dmg_this_shot: int = _roll_final_damage_for_shot()
@@ -415,10 +435,8 @@ func fire() -> void:
 		if dist > max_range and dist > 0.0001:
 			end_pos = from + to_vec.normalized() * max_range
 
-		# Apply final damage; we already listen for 'damaged' from _on_body_entered
 		_apply_damage_final(v, dmg_this_shot)
-
-		_spawn_tracer(from, end_pos)
+		_spawn_laser_beam(from, end_pos)
 
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
@@ -458,7 +476,7 @@ func _detect_initial_range() -> float:
 			return (s as CapsuleShape3D).radius
 		if s is BoxShape3D:
 			var sz := (s as BoxShape3D).size
-			return max(sz.x, sz.z) * 0.5
+			return maxf(sz.x, sz.z) * 0.5
 	return 0.0
 
 func _apply_range_to_area(r: float) -> void:
@@ -479,7 +497,6 @@ func _apply_range_to_area(r: float) -> void:
 			b.size = Vector3(r * 2.0, sz.y, r * 2.0)
 		cs.shape = s
 
-# ---- Range ring visuals ----
 # ---- Range ring visuals ----
 func _ensure_range_ring() -> MeshInstance3D:
 	if _range_ring != null:
@@ -506,25 +523,20 @@ func _ensure_range_ring() -> MeshInstance3D:
 	_update_range_ring()
 	return _range_ring
 
-
 func _update_range_ring() -> void:
 	if _range_ring == null:
 		return
-
 	var tor: TorusMesh = _range_ring.mesh as TorusMesh
 	if tor == null:
 		tor = TorusMesh.new()
 		tor.resource_local_to_scene = true
 		_range_ring.mesh = tor
 
-	# Use maxf and explicit float typing to avoid Variant inference
 	var outer: float = maxf(0.01, _current_acquire_range)
 	var inner: float = maxf(0.001, outer - maxf(0.01, range_ring_thickness))
-
 	tor.outer_radius = outer
 	tor.inner_radius = inner
 	_range_ring.position.y = range_ring_height
-
 
 func _set_range_ring_visible(v: bool) -> void:
 	var mi: MeshInstance3D = _ensure_range_ring()
@@ -533,32 +545,62 @@ func _set_range_ring_visible(v: bool) -> void:
 		_update_range_ring()
 
 # =========================================================
-# FX
+# FX (BLACK laser beam via MIX blending; fades out quickly)
 # =========================================================
-func _spawn_tracer(start_pos: Vector3, end_pos: Vector3) -> void:
-	if projectile_scene == null:
-		return
-	var tracer := projectile_scene.instantiate() as Node3D
-	if tracer == null:
-		return
-	get_tree().current_scene.add_child(tracer)
-	tracer.global_position = start_pos
+func _spawn_laser_beam(start_pos: Vector3, end_pos: Vector3) -> void:
+	var length: float = maxf(0.05, start_pos.distance_to(end_pos))
+	var mid: Vector3 = (start_pos + end_pos) * 0.5
 
-	if tracer.has_method("setup"):
-		tracer.call("setup", start_pos, end_pos, tracer_speed)
-	else:
-		var s := tracer.scale
-		tracer.look_at(end_pos, Vector3.UP)
-		tracer.scale = s
-		var dist2: float = start_pos.distance_to(end_pos)
-		var dur: float = 0.05
-		if tracer_speed > 0.0:
-			dur = dist2 / tracer_speed
-		dur = max(dur, 0.05)
-		var tw := get_tree().create_tween()
-		tw.tween_property(tracer, "global_position", end_pos, dur)
-		tw.tween_callback(tracer.queue_free)
+	var root := Node3D.new()
+	root.name = "LaserBeam"
+	var parent: Node = get_tree().current_scene
+	if parent == null:
+		parent = get_tree().root
+	parent.add_child(root)
+	root.global_position = mid
+	root.look_at(end_pos, Vector3.UP)   # +Z toward target
 
+	# Core (thin)
+	var core := MeshInstance3D.new()
+	var core_mesh := BoxMesh.new()
+	core_mesh.size = Vector3(laser_width * 0.33, laser_width * 0.33, length)
+	core.mesh = core_mesh
+	core.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var core_mat := StandardMaterial3D.new()
+	core_mat.resource_local_to_scene = true
+	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	core_mat.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+	core_mat.albedo_color = laser_color_core
+	core_mat.emission_enabled = false
+	core_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	core.material_override = core_mat
+	root.add_child(core)
+
+	# Glow (fatter)
+	var glow := MeshInstance3D.new()
+	var glow_mesh := BoxMesh.new()
+	glow_mesh.size = Vector3(laser_width, laser_width, length)
+	glow.mesh = glow_mesh
+	glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var glow_mat := StandardMaterial3D.new()
+	glow_mat.resource_local_to_scene = true
+	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	glow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glow_mat.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+	glow_mat.albedo_color = laser_color_glow
+	glow_mat.emission_enabled = false
+	glow_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	glow.material_override = glow_mat
+	root.add_child(glow)
+
+	# Fade + cleanup
+	var tw := get_tree().create_tween()
+	tw.tween_property(glow_mat, "albedo_color:a", 0.0, laser_duration)
+	tw.tween_property(core_mat, "albedo_color:a", 0.0, laser_duration)
+	tw.tween_callback(root.queue_free)
+
+# Keep muzzle flash / animation
 func _play_shoot_fx() -> void:
 	if _muzzle_particles != null:
 		if _muzzle_particles.has_method("restart"):
@@ -579,7 +621,7 @@ func _play_shoot_fx() -> void:
 		_anim.play(clip)
 
 # =========================================================
-# Target death wiring (optional minimal)
+# Target death wiring
 # =========================================================
 func _connect_target_signals(t: Node) -> void:
 	if t == null:
@@ -594,20 +636,18 @@ func _disconnect_target_signals() -> void:
 		target.disconnect("died", Callable(self, "_on_target_died"))
 
 func _on_target_died() -> void:
-	# also stop listening to its damage events
 	if target and target.has_signal("damaged") and target.is_connected("damaged", Callable(self, "_on_enemy_damaged")):
 		target.disconnect("damaged", Callable(self, "_on_enemy_damaged"))
 	_disconnect_target_signals()
 	target = null
 
 # =========================================================
-# Stats dialog (resizable, scrollable, correct wrapping)
+# Stats dialog
 # =========================================================
 func _ensure_stats_dialog() -> AcceptDialog:
 	if _stats_window != null:
 		return _stats_window
 
-	# Make sure we have a dedicated layer above other UI (defeat screen, etc.)
 	if _stats_layer == null:
 		_stats_layer = CanvasLayer.new()
 		_stats_layer.layer = 200
@@ -616,30 +656,27 @@ func _ensure_stats_dialog() -> AcceptDialog:
 
 	var dlg := AcceptDialog.new()
 	dlg.title = "Turret"
-	dlg.unresizable = false                 # allow user resizing
-	dlg.min_size = Vector2i(420, 240)       # wide enough for wrapping
+	dlg.unresizable = false
+	dlg.min_size = Vector2i(420, 240)
 	dlg.size = Vector2i(460, 300)
-	dlg.exclusive = false                   # non-modal; won't block game input
+	dlg.exclusive = false
 	dlg.always_on_top = true
 	dlg.process_mode = Node.PROCESS_MODE_ALWAYS
 	dlg.dialog_hide_on_ok = true
 	dlg.confirmed.connect(Callable(dlg, "hide"))
 	dlg.close_requested.connect(Callable(dlg, "hide"))
 	dlg.canceled.connect(Callable(dlg, "hide"))
-	# Keep the range ring visibility in lockstep with the dialog
 	dlg.visibility_changed.connect(func ():
 		_set_range_ring_visible(dlg.visible)
 		if dlg.visible:
 			_update_range_ring()
 	)
 
-	# Root container
 	var root := VBoxContainer.new()
 	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.size_flags_vertical   = Control.SIZE_EXPAND_FILL
 	dlg.add_child(root)
 
-	# Scroll area (vertical only; no horizontal bar)
 	var sc := ScrollContainer.new()
 	sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sc.size_flags_vertical   = Control.SIZE_EXPAND_FILL
@@ -647,7 +684,6 @@ func _ensure_stats_dialog() -> AcceptDialog:
 	sc.vertical_scroll_mode   = ScrollContainer.SCROLL_MODE_AUTO
 	root.add_child(sc)
 
-	# Margin + label
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.size_flags_vertical   = Control.SIZE_EXPAND_FILL
@@ -661,10 +697,9 @@ func _ensure_stats_dialog() -> AcceptDialog:
 	_stats_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_stats_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_stats_label.size_flags_vertical   = Control.SIZE_EXPAND_FILL
-	_stats_label.custom_minimum_size = Vector2(360, 0)   # fixed wrap width target
+	_stats_label.custom_minimum_size = Vector2(360, 0)
 	margin.add_child(_stats_label)
 
-	# Footer buttons
 	dlg.add_button("Sell", false, "sell")
 	dlg.custom_action.connect(func(name):
 		if name == "sell":
@@ -673,7 +708,6 @@ func _ensure_stats_dialog() -> AcceptDialog:
 	)
 	dlg.get_ok_button().text = "Close"
 
-	# Parent dialog to the dedicated layer so it's always above overlays
 	_stats_layer.add_child(dlg)
 	_stats_window = dlg
 	return dlg
@@ -682,7 +716,9 @@ func _refresh_stats_text() -> void:
 	if _stats_label == null:
 		return
 
-	var shots_per_s := (1.0 / _current_fire_rate) if _current_fire_rate > 0.0 else 0.0
+	var shots_per_s: float = 0.0
+	if _current_fire_rate > 0.0:
+		shots_per_s = 1.0 / _current_fire_rate
 	var refund_preview := int(round(float(_spent_local) * float(sell_refund_percent) / 100.0))
 
 	var fire_rate_str := String.num(_current_fire_rate, 2)
@@ -712,27 +748,22 @@ func _on_sell_pressed() -> void:
 	queue_free()
 
 func _mark_tile_freed() -> void:
-	# Resolve the board reference if needed
 	if _tile_board == null and tile_board_path != NodePath(""):
 		_tile_board = get_node_or_null(tile_board_path)
 	if _tile_board == null:
 		var b := get_tree().root.find_child("TileBoard", true, false)
 		if b is Node: _tile_board = b
-
 	if _tile_board == null:
 		return
 
-	# Prefer the cell we were given; fall back to asking the board
 	var cell := _tile_cell
 	if (cell.x <= -9999 or cell.y <= -9999) and _tile_board.has_method("world_to_cell"):
 		cell = _tile_board.call("world_to_cell", global_transform.origin)
 
-	# Preferred path: use the board’s API
 	if _tile_board.has_method("free_tile"):
 		_tile_board.call("free_tile", cell)
 		return
 
-	# Fallback: directly repair the tile and force a path refresh
 	var tile: Node = null
 	if _tile_board.has("tiles"):
 		var d: Variant = _tile_board.get("tiles")
@@ -750,7 +781,6 @@ func _mark_tile_freed() -> void:
 	elif _tile_board.has_signal("global_path_changed"):
 		_tile_board.emit_signal("global_path_changed")
 
-
 func toggle_stats_panel() -> void:
 	var dlg := _ensure_stats_dialog()
 	if dlg.visible:
@@ -762,7 +792,7 @@ func toggle_stats_panel() -> void:
 		dlg.popup_centered()
 
 # =========================================================
-# Getters used by HUD/PowerUps
+# Getters (HUD/PowerUps)
 # =========================================================
 func get_base_fire_rate() -> float:        return float(base_fire_rate)
 func get_rate_mult_per_level() -> float:   return float(rate_mult_per_level)

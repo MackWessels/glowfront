@@ -967,23 +967,31 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 func _make_wall(parent: Node3D, center_on_ground: Vector3, size_x: float, size_z: float, height: float, name: String) -> void:
 	if size_x <= 0.0001 or size_z <= 0.0001 or height <= 0.0001:
 		return
+
 	var sb := StaticBody3D.new()
 	sb.name = name
 	parent.add_child(sb)
+
+	# Physics layers for enemy collisions remain the same
 	sb.collision_layer = wall_collision_layer
 	sb.collision_mask  = wall_collision_mask
+	sb.input_ray_pickable = false
 	sb.global_position = center_on_ground + Vector3(0.0, height * 0.5, 0.0)
+
 	var cs := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(size_x, height, size_z)
 	cs.shape = box
 	sb.add_child(cs)
+
 	if render_debug_wall_mesh:
 		var mi := MeshInstance3D.new()
 		var bm := BoxMesh.new()
 		bm.size = Vector3(size_x, height, size_z)
 		mi.mesh = bm
+		mi.ray_pickable = false
 		sb.add_child(mi)
+
 
 # ---------------- Path change helper ----------------
 func _emit_path_changed() -> void:
@@ -1200,3 +1208,9 @@ func free_tile(cell: Vector2i) -> void:
 		t.call("repair_tile")
 	_recompute_flow()
 	_emit_path_changed()
+
+
+func request_build_on_tile(tile: Node, action: String) -> void:
+	if tile == null or not is_instance_valid(tile): return
+	set_active_tile(tile)
+	_on_place_selected(action)

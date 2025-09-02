@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3 uid="uid://b8msl4kqjlhan"]
+[gd_scene load_steps=14 format=3 uid="uid://b8msl4kqjlhan"]
 
 [ext_resource type="Script" uid="uid://43uec7mcm20v" path="res://scripts/main.gd" id="1_0wfyh"]
 [ext_resource type="Script" uid="uid://dua44e6q1q1yx" path="res://scripts/camera_control.gd" id="2_tefeu"]
@@ -7,6 +7,8 @@
 [ext_resource type="Script" uid="uid://bknoja7kjw7tr" path="res://scripts/minerals_hud.gd" id="4_jyhfs"]
 [ext_resource type="Script" uid="uid://bkopvmx0jqqr4" path="res://scripts/power_ups_hud.gd" id="5_tbgi4"]
 [ext_resource type="Script" uid="uid://e1q6bkscns61" path="res://scripts/shards_hud.gd" id="7_o6xl0"]
+[ext_resource type="Script" uid="uid://bei0j3oubrsgj" path="res://scripts/TurretButton.gd" id="8_85g3d"]
+[ext_resource type="Script" uid="uid://b6g4nad2dhfv4" path="res://scenes/BuildManager.gd" id="8_tipki"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7dm0k"]
 sky_top_color = Color(0.517647, 0.788235, 1, 1)
@@ -140,5 +142,31 @@ script = ExtResource("7_o6xl0")
 
 [node name="Amount" type="Label" parent="HUDLeft/ShardsHUD"]
 layout_mode = 2
+
+[node name="BuildManager" type="Node" parent="."]
+script = ExtResource("8_tipki")
+
+[node name="BuildUI" type="CanvasLayer" parent="."]
+layer = 50
+
+[node name="HUDRoot" type="Control" parent="BuildUI"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Toolbar" type="HBoxContainer" parent="BuildUI/HUDRoot"]
+offset_left = 16.0
+offset_top = 56.0
+offset_right = 24.0
+offset_bottom = 64.0
+
+[node name="TurretButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
+layout_mode = 2
+script = ExtResource("8_85g3d")
+build_manager_path = NodePath("../../../../BuildManager")
 
 [connection signal="resized" from="GameOver" to="GameOver" method="_on_resized"]
