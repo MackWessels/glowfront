@@ -161,6 +161,7 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="Toolbar" type="HBoxContainer" parent="BuildUI/HUDRoot"]
+layout_mode = 0
 offset_left = 16.0
 offset_top = 56.0
 offset_right = 24.0
@@ -168,7 +169,13 @@ offset_bottom = 64.0
 
 [node name="TurretButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
 layout_mode = 2
+text = "Turret"
 script = ExtResource("8_85g3d")
-build_manager_path = NodePath("../../../../BuildManager")
+
+[node name="TurretButtonHeavy" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
+layout_mode = 2
+text = "Heavy"
+script = ExtResource("8_85g3d")
+action_name = "mortar"
 
 [connection signal="resized" from="GameOver" to="GameOver" method="_on_resized"]

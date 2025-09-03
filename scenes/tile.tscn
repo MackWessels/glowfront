@@ -1,8 +1,9 @@
-[gd_scene load_steps=7 format=3 uid="uid://bejcwxqtu5216"]
+[gd_scene load_steps=8 format=3 uid="uid://bejcwxqtu5216"]
 
 [ext_resource type="Script" uid="uid://dot378ganxpkr" path="res://scripts/tile.gd" id="1_3dk36"]
 [ext_resource type="PackedScene" uid="uid://b22tilr55l82o" path="res://scenes/tower.tscn" id="2_ywnoi"]
 [ext_resource type="PackedScene" uid="uid://dj63u8wsfoy7r" path="res://scenes/wall.tscn" id="3_jy7pm"]
+[ext_resource type="PackedScene" uid="uid://dh6q12bqaxf52" path="res://scenes/mortar_tower.tscn" id="4_q7utx"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jy7pm"]
 
@@ -19,6 +20,7 @@ collision_mask = 8
 script = ExtResource("1_3dk36")
 turret_scene = ExtResource("2_ywnoi")
 wall_scene = ExtResource("3_jy7pm")
+mortar_scene = ExtResource("4_q7utx")
 
 [node name="TileMesh" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.0877134, 0)
