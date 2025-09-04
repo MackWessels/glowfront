@@ -1,4 +1,5 @@
 res://scenes/main.tscn
+res://scripts/tower.gd
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
 res://scenes/enemy_spawner.tscn
@@ -10,5 +11,9 @@ res://scenes/wall.tscn
 res://scenes/tower.tscn
 res://scenes/goal.tscn
 res://scenes/mortar_tower.tscn
-res://scenes/BuildManager.gd
-res://scenes/mortar_tower.gd
+res://scripts/projectile.gd
+res://mortar_shell.gd
+res://scripts/mortar_shell.tscn
+res://scenes/mortar_shell.tscn
+res://scripts/mortar_tower.gd
+res://scripts/mortar_shell.gd

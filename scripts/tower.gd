@@ -301,16 +301,37 @@ func _recompute_stats() -> void:
 # =========================================================
 # Multishot + damage rolling
 # =========================================================
+# Returns how many targets to shoot this trigger.
+# Uses percent from PowerUps (e.g., 0, 20, 40...). Supports >100% as guaranteed extra shots.
+# Exactly 1 when no multishot is bought/applied. Supports >100% later.
 func _compute_multishot_count() -> int:
-	var pct: float = 0.0
-	if PowerUps != null and PowerUps.has_method("multishot_percent_value"):
-		pct = maxf(0.0, PowerUps.multishot_percent_value())
-	var extra_guaranteed: int = int(floor(pct / 100.0))
-	var remainder: float = pct - float(extra_guaranteed) * 100.0
-	var count: int = 1 + extra_guaranteed
-	if remainder > 0.0 and randf() * 100.0 < remainder:
-		count += 1
-	return max(1, count)
+	var level := 0
+
+	if PowerUps != null:
+		# Prefer "applied" if your +/- system is in use; else fall back to total level.
+		if PowerUps.has_method("applied_for"):
+			level = int(PowerUps.applied_for("turret_multishot"))
+		if level <= 0 and PowerUps.has_method("total_level"):
+			level = int(PowerUps.total_level("turret_multishot"))
+
+	# No level -> strictly single shot.
+	if level <= 0:
+		return 1
+
+	# Use the configured percent (PowerUps returns a PERCENT, not probability)
+	var pct := 0.0
+	if PowerUps.has_method("multishot_percent_value"):
+		pct = maxf(0.0, float(PowerUps.multishot_percent_value()))
+
+	var extras := pct * 0.01            # e.g., 135% => 1.35 extras
+	var whole := int(floor(extras))
+	var frac  := extras - float(whole)
+
+	var shots := 1 + whole
+	if randf() < frac:
+		shots += 1
+	return max(1, shots)
+
 
 func _roll_final_damage_for_shot() -> int:
 	var total := float(_current_damage)
@@ -352,10 +373,11 @@ func _select_victims_widest(count: int) -> Array[Node3D]:
 # =========================================================
 func _on_body_entered(body: Node) -> void:
 	if body.is_in_group("enemy"):
-		# Listen to damage BEFORE any shots land
 		if body.has_signal("damaged") and not body.is_connected("damaged", Callable(self, "_on_enemy_damaged")):
 			body.connect("damaged", Callable(self, "_on_enemy_damaged"))
-		targets_in_range.append(body as Node3D)
+		if not targets_in_range.has(body):   # <-- guard against duplicates
+			targets_in_range.append(body as Node3D)
+
 
 func _on_body_exited(body: Node) -> void:
 	if body.is_in_group("enemy"):
@@ -412,12 +434,21 @@ func fire() -> void:
 	aim_pos.y = turret_pos.y
 	Turret.look_at(aim_pos, Vector3.UP)
 
-	# Build victims list, force primary first
+	# --- Multishot (strictly single-target unless level/applied > 0) ---
 	var want: int = _compute_multishot_count()
-	var victims: Array[Node3D] = _select_victims_widest(want)
-	if victims.has(primary):
-		victims.erase(primary)
-	victims.insert(0, primary)
+
+	# Build victims list: force primary first; only add extras when want > 1
+	var victims: Array[Node3D] = [primary]
+	if want > 1:
+		var pool: Array[Node3D] = _select_victims_widest(want)
+		if pool.has(primary):
+			pool.erase(primary)
+		var extra: int = clampi(want - 1, 0, pool.size())   # <-- typed int
+		for i in range(extra):
+			var v: Node3D = pool[i]                         # <-- typed element
+			if v != null and is_instance_valid(v):
+				victims.append(v)
+
 
 	var from: Vector3 = MuzzlePoint.global_position
 	var dmg_this_shot: int = _roll_final_damage_for_shot()
@@ -440,6 +471,7 @@ func fire() -> void:
 
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
+
 
 func _apply_damage_final(enemy: Node, dmg: int) -> void:
 	if enemy and is_instance_valid(enemy) and enemy.has_method("take_damage"):

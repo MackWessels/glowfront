@@ -1,13 +1,14 @@
 [gd_scene load_steps=14 format=4 uid="uid://dh6q12bqaxf52"]
 
-[ext_resource type="Script" uid="uid://cbs2m1x1f13dn" path="res://scenes/mortar_tower.gd" id="1_2i3vw"]
-[ext_resource type="PackedScene" uid="uid://kjyp3nbsl47k" path="res://scenes/projectile.tscn" id="2_0cdxi"]
+[ext_resource type="Script" uid="uid://cbs2m1x1f13dn" path="res://scripts/mortar_tower.gd" id="1_2i3vw"]
+[ext_resource type="PackedScene" uid="uid://g20rau1u5ajl" path="res://scenes/mortar_shell.tscn" id="2_0cdxi"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_4vjjp"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_0cdxi"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_so3co"]
+albedo_color = Color(1, 0.67451, 0.309804, 1)
 
 [sub_resource type="ArrayMesh" id="ArrayMesh_honsw"]
 _surfaces = [{
@@ -42,6 +43,7 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_honsw")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_r7ils"]
+albedo_color = Color(1, 1, 0.145098, 1)
 
 [sub_resource type="ArrayMesh" id="ArrayMesh_ads6p"]
 _surfaces = [{
@@ -76,6 +78,7 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_ads6p")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_4nxo2"]
+albedo_color = Color(0.0400798, 0.0378594, 0.0375691, 1)
 
 [sub_resource type="ArrayMesh" id="ArrayMesh_fnwrj"]
 _surfaces = [{
@@ -111,9 +114,17 @@ shadow_mesh = SubResource("ArrayMesh_fnwrj")
 
 [node name="MortarTower" type="Node3D"]
 script = ExtResource("1_2i3vw")
+detection_area_path = NodePath("DetectionArea")
+click_body_path = NodePath("ClickBody")
+yaw_path = NodePath("mortar_tower_model/Yaw")
+pitch_path = NodePath("mortar_tower_model/Yaw/Pitch")
+muzzle_point_path = NodePath("mortar_tower_model/Yaw/Pitch/Barrel/MuzzlePoint")
+yaw_offset_deg = -110.0
 shell_scene = ExtResource("2_0cdxi")
 
 [node name="DetectionArea" type="Area3D" parent="."]
+collision_layer = 0
+collision_mask = 4
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="DetectionArea"]
 shape = SubResource("SphereShape3D_4vjjp")
@@ -124,6 +135,7 @@ shape = SubResource("SphereShape3D_4vjjp")
 shape = SubResource("BoxShape3D_0cdxi")
 
 [node name="mortar_tower_model" type="Node3D" parent="."]
+transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0.4, 0)
 
 [node name="Yaw" type="Node3D" parent="mortar_tower_model"]
 transform = Transform3D(0.6, 0, 0, 0, 0.6, 0, 0, 0, 0.6, 0, 7.45058e-09, 0)
@@ -131,7 +143,7 @@ transform = Transform3D(0.6, 0, 0, 0, 0.6, 0, 0, 0, 0.6, 0, 7.45058e-09, 0)
 [node name="Pitch" type="Node3D" parent="mortar_tower_model/Yaw"]
 
 [node name="Barrel" type="MeshInstance3D" parent="mortar_tower_model/Yaw/Pitch"]
-transform = Transform3D(0.353553, 0.50676, 0, -0.353553, 0.50676, 0, 0, 0, 0.5, 0.583333, 0.583333, 0)
+transform = Transform3D(0.270822, 0.388909, 0, -0.270822, 0.388909, 0, 0, 0, 0.383, 0.583333, 0.583333, 0)
 mesh = SubResource("ArrayMesh_obe3l")
 skeleton = NodePath("")
 

@@ -1,8 +1,8 @@
 [gd_scene load_steps=5 format=3 uid="uid://dwdo6442wh28n"]
 
 [ext_resource type="Script" uid="uid://cljsnyj3dd8eb" path="res://scripts/main_menu.gd" id="1_l6cm7"]
-[ext_resource type="Script" uid="uid://7b75ey2guopi" path="res://scenes/shards_label.gd" id="2_ekxnf"]
-[ext_resource type="Script" uid="uid://7prtr0tyxjw2" path="res://scenes/shard_upgrades_panel.gd" id="3_bqqt6"]
+[ext_resource type="Script" uid="uid://7b75ey2guopi" path="res://scripts/shards_label.gd" id="2_ekxnf"]
+[ext_resource type="Script" uid="uid://7prtr0tyxjw2" path="res://scripts/shard_upgrades_panel.gd" id="3_bqqt6"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ekxnf"]
 corner_radius_top_left = 14

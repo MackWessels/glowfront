@@ -8,7 +8,7 @@
 [ext_resource type="Script" uid="uid://bkopvmx0jqqr4" path="res://scripts/power_ups_hud.gd" id="5_tbgi4"]
 [ext_resource type="Script" uid="uid://e1q6bkscns61" path="res://scripts/shards_hud.gd" id="7_o6xl0"]
 [ext_resource type="Script" uid="uid://bei0j3oubrsgj" path="res://scripts/TurretButton.gd" id="8_85g3d"]
-[ext_resource type="Script" uid="uid://b6g4nad2dhfv4" path="res://scenes/BuildManager.gd" id="8_tipki"]
+[ext_resource type="Script" uid="uid://b6g4nad2dhfv4" path="res://scripts/BuildManager.gd" id="8_tipki"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7dm0k"]
 sky_top_color = Color(0.517647, 0.788235, 1, 1)
