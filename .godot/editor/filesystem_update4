@@ -1,5 +1,4 @@
 res://scenes/main.tscn
-res://scenes/BuildManager.gd
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
 res://scenes/enemy_spawner.tscn
@@ -10,8 +9,6 @@ res://scenes/main_menu.tscn
 res://scenes/wall.tscn
 res://scenes/tower.tscn
 res://scenes/goal.tscn
-res://scripts/tile_board.gd
 res://scenes/mortar_tower.tscn
+res://scenes/BuildManager.gd
 res://scenes/mortar_tower.gd
-res://scripts/tile.gd
-res://scripts/TurretButton.gd
