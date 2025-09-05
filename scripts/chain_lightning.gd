@@ -1,106 +1,100 @@
 extends Node
+## Global Chain Lightning helper (blue zaps)
 
+const ENEMY_GROUP := "enemy"
 
-# =========================
-# Config / tuning
-# =========================
-@export var enemy_group: String = "enemy"
-
-# Visuals (blue lightning)
+# ---------- Visual tuning ----------
 @export var beam_width: float = 0.09
 @export var beam_duration: float = 0.08
-@export var beam_color_core: Color = Color(0.55, 0.85, 1.0, 0.95)
-@export var beam_color_glow: Color = Color(0.35, 0.70, 1.0, 0.65)
+@export var color_core: Color = Color(0.55, 0.85, 1.0, 0.95) # bright blue core
+@export var color_glow: Color = Color(0.25, 0.65, 1.0, 0.65) # softer blue glow
 
-# Safety
-@export var max_beams_per_chain: int = 32
+# Optional segmented “zig” look
+@export var use_polyline: bool = false
+@export var jitter_segments: int = 6
+@export var jitter_amount: float = 0.35
 
-# Damage floor (applies once a proc happens)
-@export var min_chain_damage: int = 1
+# ---------- Re-entry guard ----------
+var _is_proccing: bool = false
+func is_running() -> bool: return _is_proccing
 
-# Optional logging
-@export var debug_trace: bool = false
-
-
-# =========================
+# =========================================================
 # Public API
-# =========================
-# Call this when a hit lands to *attempt* a chain proc.
-# - start_enemy: the enemy that was just hit by the main attack
-# - base_final_damage: the final damage of that main hit (after crits/mults)
-# - by: the turret / source node (passed to take_damage "by" field for attribution)
-# - start_pos (optional): if you want to draw the *first* segment from some point to
-#   start_enemy, you could use this later—right now we draw from enemy->enemy only.
-func try_proc(start_enemy: Node3D, base_final_damage: int, by: Node = null, start_pos: Vector3 = Vector3.ZERO) -> void:
-	if start_enemy == null or not is_instance_valid(start_enemy):
+# =========================================================
+# start_pos is OPTIONAL so both 3-arg (mortar) and 4-arg (turret) calls work.
+func try_proc(start_enemy: Node, source_final_damage: int, owner: Node, start_pos: Variant = null) -> void:
+	if _is_proccing:
 		return
 
 	var chance := (PowerUps.chain_chance_value() if PowerUps and PowerUps.has_method("chain_chance_value") else 0.0)
-	if chance <= 0.0:
-		return
-	if randf() > chance:
+	if chance <= 0.0 or randf() > chance:
 		return
 
-	_do_chain(start_enemy, base_final_damage, by)
-
-
-# Force a chain (ignores proc chance); useful for testing.
-func force_chain(start_enemy: Node3D, base_final_damage: int, by: Node = null) -> void:
-	if start_enemy == null or not is_instance_valid(start_enemy):
-		return
-	_do_chain(start_enemy, base_final_damage, by)
-
-
-# =========================
-# Internals
-# =========================
-func _do_chain(start_enemy: Node3D, base_final_damage: int, by: Node) -> void:
 	var jumps := (PowerUps.chain_jumps_value() if PowerUps and PowerUps.has_method("chain_jumps_value") else 0)
 	if jumps <= 0:
 		return
 
-	var radius := (PowerUps.chain_radius_value() if PowerUps and PowerUps.has_method("chain_radius_value") else 5.0)
-	var dmg := _calc_chain_damage(base_final_damage)
-	if dmg <= 0:
-		dmg = min_chain_damage
+	var pct := (PowerUps.chain_damage_percent_value() if PowerUps and PowerUps.has_method("chain_damage_percent_value") else 0.0)
+	var dmg := int(round(maxf(0.0, float(source_final_damage) * (pct * 0.01))))
+	if dmg < 1:  # floor to 1 so tiny % still deals a zap
+		dmg = 1
 
-	var visited := {}
+	var radius := (PowerUps.chain_radius_value() if PowerUps and PowerUps.has_method("chain_radius_value") else 5.0)
+
+	_is_proccing = true
+
+	# Optional initial visual zap from muzzle -> first enemy (used by turrets)
+	if start_pos != null and typeof(start_pos) == TYPE_VECTOR3 and start_enemy and is_instance_valid(start_enemy):
+		_spawn_beam(start_pos, (start_enemy as Node3D).global_position)
+
+	_do_chain(start_enemy as Node3D, owner, dmg, jumps, radius)
+	_is_proccing = false
+
+# Back-compat helper: same order you used in your force-test
+func zap_chain(start_pos: Vector3, start_enemy: Node3D, base_final_damage: int, owner: Node) -> void:
+	try_proc(start_enemy, base_final_damage, owner, start_pos)
+
+# Force a chain (ignores chance); useful for testing.
+func force_chain(start_enemy: Node3D, base_final_damage: int, by: Node = null, start_pos: Variant = null) -> void:
+	var owner := (by if by != null else self)
+	# Reuse the same logic via try_proc (no chance gate): set _is_proccing and call core
+	var pct := (PowerUps.chain_damage_percent_value() if PowerUps and PowerUps.has_method("chain_damage_percent_value") else 0.0)
+	var dmg := int(round(maxf(0.0, float(base_final_damage) * (pct * 0.01))))
+	if dmg < 1: dmg = 1
+	var jumps := (PowerUps.chain_jumps_value() if PowerUps and PowerUps.has_method("chain_jumps_value") else 0)
+	var radius := (PowerUps.chain_radius_value() if PowerUps and PowerUps.has_method("chain_radius_value") else 5.0)
+
+	_is_proccing = true
+	if start_pos != null and typeof(start_pos) == TYPE_VECTOR3 and start_enemy and is_instance_valid(start_enemy):
+		_spawn_beam(start_pos, start_enemy.global_position)
+	_do_chain(start_enemy, owner, dmg, jumps, radius)
+	_is_proccing = false
+
+# =========================================================
+# Core chain logic
+# =========================================================
+func _do_chain(start_enemy: Node3D, owner: Node, dmg_per_jump: int, jumps: int, radius: float) -> void:
+	if start_enemy == null or not is_instance_valid(start_enemy):
+		return
+	if jumps <= 0 or dmg_per_jump <= 0:
+		return
+
+	var visited: Dictionary = {}
 	visited[start_enemy.get_instance_id()] = true
 
 	var prev: Node3D = start_enemy
-	var beams := 0
-	var made_any_link := false
-
 	for _i in range(jumps):
 		var nxt := _find_next_target(prev, visited, radius)
 		if nxt == null:
-			if not made_any_link:
-				# "Must chain to at least 1 other" -> if no first link, do nothing
-				if debug_trace:
-					print("[Chain] no first neighbor found; abort")
 			break
 
-		# Apply damage and draw blue lightning segment
-		_apply_damage(nxt, dmg, by)
+		# apply damage and show a blue zap
+		if nxt.has_method("take_damage"):
+			nxt.call("take_damage", {"final": dmg_per_jump, "source": "chain", "by": owner})
 		_spawn_beam(prev.global_position, nxt.global_position)
-		made_any_link = true
 
 		visited[nxt.get_instance_id()] = true
 		prev = nxt
-		beams += 1
-		if beams >= max_beams_per_chain:
-			break
-
-	if debug_trace and made_any_link:
-		print("[Chain] jumps=", beams, " dmg_each=", dmg)
-
-
-func _calc_chain_damage(base_final_damage: int) -> int:
-	var pct := (PowerUps.chain_damage_percent_value() if PowerUps and PowerUps.has_method("chain_damage_percent_value") else 0.0)
-	var dmg := int(round(maxf(0.0, float(base_final_damage) * (pct * 0.01))))
-	# Floor to at least 1 once a proc occurs:
-	return max(min_chain_damage, dmg)
-
 
 func _find_next_target(from_enemy: Node3D, visited: Dictionary, radius: float) -> Node3D:
 	if from_enemy == null or not is_instance_valid(from_enemy):
@@ -110,7 +104,7 @@ func _find_next_target(from_enemy: Node3D, visited: Dictionary, radius: float) -
 	var best: Node3D = null
 	var best_d := INF
 
-	for n in get_tree().get_nodes_in_group(enemy_group):
+	for n in get_tree().get_nodes_in_group(ENEMY_GROUP):
 		var e := n as Node3D
 		if e == null or not is_instance_valid(e):
 			continue
@@ -120,72 +114,78 @@ func _find_next_target(from_enemy: Node3D, visited: Dictionary, radius: float) -
 		if d <= radius and d < best_d:
 			best_d = d
 			best = e
+
 	return best
 
+# =========================================================
+# Visuals (blue lightning beam)
+# =========================================================
+func _spawn_beam(a: Vector3, b: Vector3) -> void:
+	if use_polyline:
+		_spawn_polyline_beam(a, b)
+	else:
+		_spawn_box_beam(a, b)
 
-func _apply_damage(enemy: Node, amount: int, by: Node) -> void:
-	if enemy and is_instance_valid(enemy) and enemy.has_method("take_damage"):
-		enemy.call("take_damage", {"final": amount, "source": "chain", "by": by})
-
-
-# =========================
-# Blue beam FX (simple, fast)
-# =========================
-func _spawn_beam(start_pos: Vector3, end_pos: Vector3) -> void:
-	var length: float = maxf(0.05, start_pos.distance_to(end_pos))
-	var mid: Vector3 = (start_pos + end_pos) * 0.5
+# Cheap single box segment
+func _spawn_box_beam(start_pos: Vector3, end_pos: Vector3) -> void:
+	var length := maxf(0.05, start_pos.distance_to(end_pos))
+	var mid := (start_pos + end_pos) * 0.5
 
 	var root := Node3D.new()
-	root.name = "ChainLightning"
+	root.name = "ChainBeam"
 	var parent: Node = get_tree().current_scene
 	if parent == null:
 		parent = get_tree().root
 	parent.add_child(root)
 	root.global_position = mid
-	root.look_at(end_pos, Vector3.UP)  # +Z points toward end_pos
+	root.look_at(end_pos, Vector3.UP)   # +Z toward target
 
-	# Core (thin)
+	# Core
 	var core := MeshInstance3D.new()
 	var core_mesh := BoxMesh.new()
 	core_mesh.size = Vector3(beam_width * 0.33, beam_width * 0.33, length)
 	core.mesh = core_mesh
 	core.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-
 	var core_mat := StandardMaterial3D.new()
 	core_mat.resource_local_to_scene = true
 	core_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	core_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	core_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	core_mat.albedo_color = beam_color_core
-	core_mat.emission_enabled = true
-	core_mat.emission = beam_color_core
+	core_mat.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+	core_mat.albedo_color = color_core
 	core_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	core.material_override = core_mat
 	root.add_child(core)
 
-	# Glow (fatter)
+	# Glow
 	var glow := MeshInstance3D.new()
 	var glow_mesh := BoxMesh.new()
 	glow_mesh.size = Vector3(beam_width, beam_width, length)
 	glow.mesh = glow_mesh
 	glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-
 	var glow_mat := StandardMaterial3D.new()
 	glow_mat.resource_local_to_scene = true
 	glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	glow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	glow_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	glow_mat.albedo_color = beam_color_glow
-	glow_mat.emission_enabled = true
-	glow_mat.emission = beam_color_glow
+	glow_mat.blend_mode = BaseMaterial3D.BLEND_MODE_MIX
+	glow_mat.albedo_color = color_glow
 	glow_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	glow.material_override = glow_mat
 	root.add_child(glow)
 
-	# Fade + cleanup
 	var tw := get_tree().create_tween()
 	tw.tween_property(glow_mat, "albedo_color:a", 0.0, beam_duration)
 	tw.tween_property(core_mat, "albedo_color:a", 0.0, beam_duration)
-	tw.tween_property(glow_mat, "emission:a", 0.0, beam_duration)
-	tw.tween_property(core_mat, "emission:a", 0.0, beam_duration)
 	tw.tween_callback(root.queue_free)
+
+# Segmented polyline (optional ziggy look)
+func _spawn_polyline_beam(a: Vector3, b: Vector3) -> void:
+	var n: int = max(2, jitter_segments)
+	var pts: Array[Vector3] = []
+	for i in n + 1:
+		var t := float(i) / float(n)
+		var p := a.lerp(b, t)
+		if i > 0 and i < n:
+			p += (Vector3(randf() - 0.5, randf() - 0.5, randf() - 0.5)).normalized() * jitter_amount
+		pts.append(p)
+	for i in range(pts.size() - 1):
+		_spawn_box_beam(pts[i], pts[i + 1])

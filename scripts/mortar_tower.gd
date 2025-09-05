@@ -52,6 +52,9 @@ var _can_fire := true
 var _target: Node3D = null
 var _in_range: Array[Node3D] = []
 
+# Track per-enemy signal connections (so we can disconnect cleanly)
+var _damage_cbs: Dictionary = {}     # inst_id -> Callable
+
 # Optional debug prints
 @export var debug_trace: bool = false
 
@@ -74,6 +77,9 @@ func _ready() -> void:
 			DetectionArea.body_entered.connect(_on_enter)
 		if not DetectionArea.body_exited.is_connected(_on_exit):
 			DetectionArea.body_exited.connect(_on_exit)
+		# Catch enemies already overlapping at spawn
+		for b in DetectionArea.get_overlapping_bodies():
+			_on_enter(b)
 
 	# Recompute stats now and whenever PowerUps change
 	if PowerUps != null and PowerUps.has_signal("changed"):
@@ -99,16 +105,34 @@ func _process(dt: float) -> void:
 
 # ---------------- Targeting ----------------
 func _on_enter(b: Node) -> void:
+	if not (b is Node3D):
+		return
 	if b.is_in_group(enemy_group) and not _in_range.has(b):
 		_in_range.append(b as Node3D)
+		# Wire "damaged" so we can proc chain lightning from the *victim* of our hit
+		if b.has_signal("damaged"):
+			var id := b.get_instance_id()
+			if not _damage_cbs.has(id):
+				var cb := Callable(self, "_on_enemy_damaged").bind(b)
+				b.connect("damaged", cb)
+				_damage_cbs[id] = cb
 		if debug_trace:
 			print("[mortar] entered:", b.name)
 
 func _on_exit(b: Node) -> void:
+	if not (b is Node3D):
+		return
 	if b.is_in_group(enemy_group):
 		_in_range.erase(b)
 		if b == _target:
 			_target = null
+		# Disconnect damage signal if we had wired it
+		var id := b.get_instance_id()
+		if _damage_cbs.has(id):
+			var cb: Callable = _damage_cbs[id]
+			if b.is_connected("damaged", cb):
+				b.disconnect("damaged", cb)
+			_damage_cbs.erase(id)
 		if debug_trace:
 			print("[mortar] exited:", b.name)
 
@@ -314,6 +338,15 @@ func _compute_multishot_count() -> int:
 	if randf() < frac:
 		shots += 1
 	return max(1, shots)
+
+# ---------------- Chain lightning proc (from victim) ----------------
+func _on_enemy_damaged(by: Node, amount: int, killed: bool, victim: Node) -> void:
+	if by != self or amount <= 0 or not (victim is Node3D):
+		return
+	if ChainLightning and ChainLightning.has_method("is_running") and ChainLightning.is_running():
+		return
+	ChainLightning.try_proc(victim, amount, self)
+
 
 # ---------------- Range shape apply ----------------
 func _apply_range_to_area(r: float) -> void:
