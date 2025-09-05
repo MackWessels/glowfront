@@ -30,6 +30,19 @@ var rate_level: int = 0
 @export var range_level_max: int = 10
 var range_level: int = 0
 
+# ---------- End-of-pipeline modifiers (variants override these) ----------
+# Applied AFTER global/local calculations:
+#   fire interval *= rate_mult_end   ( >1 = slower ; <1 = faster )
+#   acquire range *= range_mult_end  ( >1 = farther)
+#   damage       *= damage_mult_end
+@export var rate_mult_end: float = 1.0
+@export var range_mult_end: float = 1.0
+@export var damage_mult_end: float = 1.0
+
+# ---------- Chain lightning (autoload bridge helpers) ----------
+@export var chain_debug_prints: bool = true
+@export var chain_force_test: bool = false   # set true to force zaps for verification
+
 # ---------- Build / minerals ----------
 @export var build_cost: int = 10
 @export var minerals_path: NodePath
@@ -274,25 +287,25 @@ func _scaled_cost(base_cost: int, scale: float, level: int) -> int:
 # Derived stats
 # =========================================================
 func _recompute_stats() -> void:
-	# Damage
+	# Damage (base/global). End modifier applied at roll time (so UI and logic stay in sync below).
 	if PowerUps != null and PowerUps.has_method("turret_damage_value"):
 		_current_damage = PowerUps.turret_damage_value()
 	else:
 		_current_damage = base_damage
 
-	# Fire interval = base * local * global, clamped
+	# Fire interval = base * local * global * end, clamped
 	var local_mult := pow(maxf(0.01, rate_mult_per_level), rate_level)
 	var global_mult := 1.0
 	if PowerUps != null and PowerUps.has_method("turret_rate_mult"):
 		global_mult = maxf(0.01, PowerUps.turret_rate_mult())
-	_current_fire_rate = clampf(base_fire_rate * local_mult * global_mult, _FIRE_RATE_MIN, 999.0)
+	_current_fire_rate = clampf(base_fire_rate * local_mult * global_mult * rate_mult_end, _FIRE_RATE_MIN, 999.0)
 
-	# Acquire range
+	# Acquire range = (base + local + global_add) * end
 	var local_add := range_per_level * float(range_level)
 	var global_add := 0.0
 	if PowerUps != null and PowerUps.has_method("turret_range_bonus"):
 		global_add = PowerUps.turret_range_bonus()
-	_current_acquire_range = maxf(0.5, base_acquire_range + local_add + global_add)
+	_current_acquire_range = maxf(0.5, (base_acquire_range + local_add + global_add) * range_mult_end)
 	_apply_range_to_area(_current_acquire_range)
 
 	if _stats_window != null and _stats_window.visible:
@@ -301,29 +314,20 @@ func _recompute_stats() -> void:
 # =========================================================
 # Multishot + damage rolling
 # =========================================================
-# Returns how many targets to shoot this trigger.
-# Uses percent from PowerUps (e.g., 0, 20, 40...). Supports >100% as guaranteed extra shots.
-# Exactly 1 when no multishot is bought/applied. Supports >100% later.
 func _compute_multishot_count() -> int:
 	var level := 0
-
 	if PowerUps != null:
-		# Prefer "applied" if your +/- system is in use; else fall back to total level.
 		if PowerUps.has_method("applied_for"):
 			level = int(PowerUps.applied_for("turret_multishot"))
 		if level <= 0 and PowerUps.has_method("total_level"):
 			level = int(PowerUps.total_level("turret_multishot"))
-
-	# No level -> strictly single shot.
 	if level <= 0:
 		return 1
 
-	# Use the configured percent (PowerUps returns a PERCENT, not probability)
 	var pct := 0.0
 	if PowerUps.has_method("multishot_percent_value"):
 		pct = maxf(0.0, float(PowerUps.multishot_percent_value()))
-
-	var extras := pct * 0.01            # e.g., 135% => 1.35 extras
+	var extras := pct * 0.01
 	var whole := int(floor(extras))
 	var frac  := extras - float(whole)
 
@@ -332,9 +336,8 @@ func _compute_multishot_count() -> int:
 		shots += 1
 	return max(1, shots)
 
-
 func _roll_final_damage_for_shot() -> int:
-	var total := float(_current_damage)
+	var total := float(_current_damage) * damage_mult_end
 	var crit_ch := 0.0
 	var crit_mul := 2.0
 	if PowerUps != null:
@@ -375,9 +378,8 @@ func _on_body_entered(body: Node) -> void:
 	if body.is_in_group("enemy"):
 		if body.has_signal("damaged") and not body.is_connected("damaged", Callable(self, "_on_enemy_damaged")):
 			body.connect("damaged", Callable(self, "_on_enemy_damaged"))
-		if not targets_in_range.has(body):   # <-- guard against duplicates
+		if not targets_in_range.has(body):
 			targets_in_range.append(body as Node3D)
-
 
 func _on_body_exited(body: Node) -> void:
 	if body.is_in_group("enemy"):
@@ -428,27 +430,26 @@ func fire() -> void:
 		return
 	can_fire = false
 
-	# Re-aim at the primary we will actually shoot (belt-and-suspenders)
+	# Re-aim at the primary we will actually shoot
 	var turret_pos: Vector3 = Turret.global_position
 	var aim_pos: Vector3 = primary.global_position
 	aim_pos.y = turret_pos.y
 	Turret.look_at(aim_pos, Vector3.UP)
 
-	# --- Multishot (strictly single-target unless level/applied > 0) ---
+	# --- Multishot ---
 	var want: int = _compute_multishot_count()
 
-	# Build victims list: force primary first; only add extras when want > 1
+	# Build victims list: primary first; then extras
 	var victims: Array[Node3D] = [primary]
 	if want > 1:
 		var pool: Array[Node3D] = _select_victims_widest(want)
 		if pool.has(primary):
 			pool.erase(primary)
-		var extra: int = clampi(want - 1, 0, pool.size())   # <-- typed int
+		var extra: int = clampi(want - 1, 0, pool.size())
 		for i in range(extra):
-			var v: Node3D = pool[i]                         # <-- typed element
+			var v: Node3D = pool[i]
 			if v != null and is_instance_valid(v):
 				victims.append(v)
-
 
 	var from: Vector3 = MuzzlePoint.global_position
 	var dmg_this_shot: int = _roll_final_damage_for_shot()
@@ -469,9 +470,11 @@ func fire() -> void:
 		_apply_damage_final(v, dmg_this_shot)
 		_spawn_laser_beam(from, end_pos)
 
+		# --- Chain lightning autoload (blue FX) ---
+		_call_chain_autoload(v, dmg_this_shot, from)
+
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
-
 
 func _apply_damage_final(enemy: Node, dmg: int) -> void:
 	if enemy and is_instance_valid(enemy) and enemy.has_method("take_damage"):
@@ -482,6 +485,29 @@ func _on_enemy_damaged(by, amount: int, killed: bool) -> void:
 		_true_damage_done += max(0, amount)
 		if killed:
 			_kills += 1
+
+# =========================================================
+# Chain lightning (autoload bridge)
+# =========================================================
+func _call_chain_autoload(start_enemy: Node3D, base_final_damage: int, start_pos: Vector3) -> void:
+	var CL: Object = get_node_or_null("/root/ChainLightning")
+	if CL == null and typeof(ChainLightning) != TYPE_NIL:
+		CL = ChainLightning
+	if CL == null:
+		if chain_debug_prints:
+			print("[turret] ChainLightning autoload not found")
+		return
+
+	if chain_force_test and CL.has_method("zap_chain"):
+		if chain_debug_prints:
+			print("[turret] FORCED chain zap")
+		CL.call("zap_chain", start_pos, start_enemy, base_final_damage, self)
+		return
+
+	if CL.has_method("try_proc"):
+		CL.call("try_proc", start_enemy, base_final_damage, self, start_pos)
+	elif CL.has_method("zap_chain"):
+		CL.call("zap_chain", start_pos, start_enemy, base_final_damage, self)
 
 # =========================================================
 # Range helpers
@@ -757,9 +783,10 @@ func _refresh_stats_text() -> void:
 	var shots_per_s_str := String.num(shots_per_s, 2)
 	var range_str := String.num(_current_acquire_range, 1)
 	var lifetime_str := String.num(_lifetime_s, 1)
+	var shown_damage := int(round(float(_current_damage) * damage_mult_end))
 
 	var s := "Current\n"
-	s += "  Damage: %d\n" % _current_damage
+	s += "  Damage: %d\n" % shown_damage
 	s += "  Fire: " + fire_rate_str + "s (" + shots_per_s_str + "/s)\n"
 	s += "  Range: " + range_str + "\n"
 	s += "\nTotals\n"

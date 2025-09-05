@@ -447,6 +447,29 @@ func _tile_is_walkable(cell: Vector2i) -> bool:
 	var tower: Node = t.find_child("Tower", true, false)
 	return tower == null
 
+
+func _path_ok_if_blocked(block_cells: Array[Vector2i]) -> bool:
+	for c in block_cells:
+		_reserved_cells[c] = true
+	# Run once with reservations applied
+	var ok_bfs := _recompute_flow()
+	var reachable := false
+	if ok_bfs:
+		# Verify reachability from any real spawn opening, not the clamped spawner cell
+		var entries := spawn_pen_cells(spawner_span)
+		for sc in entries:
+			if cost.has(sc):
+				reachable = true
+				break
+	else:
+		reachable = false
+	# Cleanup and restore field
+	for c in block_cells:
+		_reserved_cells.erase(c)
+	_recompute_flow()
+	return reachable
+
+
 # ---------------- Enemy-facing API ----------------
 func next_cell_from(c: Vector2i) -> Vector2i:
 	var g := _goal_cell()
@@ -592,13 +615,17 @@ func _on_place_selected(action: String) -> void:
 	if active_tile == null or not is_instance_valid(active_tile): return
 	if action == "": return
 
-	# Mortar (2×2)
+	# ---------------- Mortar (2×2 footprint) ----------------
 	if action == "mortar":
 		var anchor: Vector2i = active_tile.get("grid_position")
 		var cells := _footprint_cells_for(anchor, Vector2i(2, 2))
 		var action_cost := _power_cost_for("mortar")
 
-		if action_cost > 0 and not _econ_can_afford(action_cost): return
+		# Affordability check
+		if action_cost > 0 and not _econ_can_afford(action_cost):
+			return
+
+		# Don't allow placing in the spawn opening strip
 		for c in cells:
 			if _is_in_spawn_opening(c, spawner_span):
 				if active_tile.has_method("break_tile"):
@@ -607,16 +634,16 @@ func _on_place_selected(action: String) -> void:
 				_clear_pending()
 				return
 
-		for c in cells: _reserved_cells[c] = true
-		var ok_path := _recompute_flow()
-		for c in cells: _reserved_cells.erase(c)
-		_recompute_flow()
+		# Path test using real spawn openings (temporary block)
+		var ok_path := _path_ok_if_blocked(cells)
 		if not ok_path:
-			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
+			if active_tile.has_method("break_tile"):
+				active_tile.call("break_tile")
 			_emit_path_changed()
 			_clear_pending()
 			return
 
+		# If any enemies are on any of the 4 cells, defer until clear
 		var any_enemies := false
 		for c in cells:
 			if _enemies_on_cell(c).size() > 0:
@@ -630,11 +657,18 @@ func _on_place_selected(action: String) -> void:
 					t.call("set_pending_blue", true)
 				_reserved_cells[c] = true
 			_recompute_flow()
-			_pending_builds.append({"cell": anchor, "cells": cells, "tile": active_tile, "action": "mortar", "cost": action_cost})
+			_pending_builds.append({
+				"cell": anchor,
+				"cells": cells,
+				"tile": active_tile,
+				"action": "mortar",
+				"cost": action_cost
+			})
 			_poll_accum = 0.0
 			_emit_path_changed()
 			return
 
+		# Place immediately
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
 		if active_tile.has_method("apply_placement"):
@@ -658,32 +692,41 @@ func _on_place_selected(action: String) -> void:
 		_clear_pending()
 		return
 
-	# Standard blocking actions
+	# ---------------- Standard blocking (turret / wall) ----------------
 	var pos: Vector2i = active_tile.get("grid_position")
 	var blocks := (action == "turret" or action == "wall")
-	var action_cost := _power_cost_for(action)
-	if blocks and action_cost > 0 and not _econ_can_afford(action_cost): return
+	var action_cost2 := _power_cost_for(action)
+
+	if blocks and action_cost2 > 0 and not _econ_can_afford(action_cost2):
+		return
+
+	# Don't allow blocking directly in the spawn opening
 	if blocks and _is_in_spawn_opening(pos, spawner_span):
 		if active_tile.has_method("break_tile"): active_tile.call("break_tile")
-		_emit_path_changed(); _clear_pending(); return
+		_emit_path_changed()
+		_clear_pending()
+		return
 
 	if blocks:
-		_reserve_cell(pos, true)
-		var ok_path2 := _recompute_flow()
-		_reserve_cell(pos, false)
-		_recompute_flow()
+		# Path test using real spawn openings (temporary block of this single cell)
+		var ok_path2 := _path_ok_if_blocked([pos])
 		if not ok_path2:
 			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
-			_emit_path_changed(); _clear_pending(); return
+			_emit_path_changed()
+			_clear_pending()
+			return
 
+		# If enemies currently on the cell, defer until clear
 		if _enemies_on_cell(pos).size() > 0:
-			if active_tile.has_method("set_pending_blue"): active_tile.call("set_pending_blue", true)
+			if active_tile.has_method("set_pending_blue"):
+				active_tile.call("set_pending_blue", true)
 			_reserve_cell(pos, true)
 			_recompute_flow()
-			_queue_pending_build(pos, active_tile, action, action_cost)
+			_queue_pending_build(pos, active_tile, action, action_cost2)
 			_emit_path_changed()
 			return
 
+		# Place immediately
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
 		if active_tile.has_method("apply_placement"):
@@ -692,11 +735,14 @@ func _on_place_selected(action: String) -> void:
 		var ok3 := _recompute_flow()
 		if not ok3:
 			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
-			_recompute_flow(); _emit_path_changed(); _clear_pending(); return
+			_recompute_flow()
+			_emit_path_changed()
+			_clear_pending()
+			return
 
 		var placed_ok2 := _placement_succeeded(active_tile, action)
-		if placed_ok2 and action_cost > 0:
-			var paid2 := _econ_spend(action_cost)
+		if placed_ok2 and action_cost2 > 0:
+			var paid2 := _econ_spend(action_cost2)
 			if not paid2 and active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
 
@@ -704,7 +750,7 @@ func _on_place_selected(action: String) -> void:
 		_clear_pending()
 		return
 
-	# Non-blocking
+	# ---------------- Non-blocking actions ----------------
 	if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 		_pending_tile.call("set_pending_blue", false)
 	if active_tile.has_method("apply_placement"):
@@ -712,6 +758,7 @@ func _on_place_selected(action: String) -> void:
 	_recompute_flow()
 	_emit_path_changed()
 	_clear_pending()
+
 
 # ---------------- Helpers ----------------
 func _power_cost_for(action: String) -> int:

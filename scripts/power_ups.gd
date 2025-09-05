@@ -31,6 +31,11 @@ func _try_spend(cost: int, reason: String = "") -> bool:
 	"crit_mult":         {"cost_sequence":[18,24,30,38,48,60,75,95,120], "max_level":0},
 	"turret_multishot":  {"cost_sequence":[25,30,36,43,51,60,70,81,93,106], "max_level":0},
 
+	# --- Chain Lightning ---
+	"chain_lightning_chance": {"cost_sequence":[20,25,30,38,48,60,75,95,120], "max_level":0},
+	"chain_lightning_damage": {"cost_sequence":[15,20,26,33,41,50,60,72,85,99], "max_level":0},
+	"chain_lightning_jumps":  {"cost_sequence":[18,24,30,38,48,60,75,95,120], "max_level":0},
+
 	# Base / utility
 	"base_max_hp":       {"cost_sequence":[20,25,32,40,49,59,70,82,95,109], "max_level":0},
 	"base_regen":        {"cost_sequence":[15,20,26,33,41,50,60,72,85,99],  "max_level":0},
@@ -64,6 +69,20 @@ func _try_spend(cost: int, reason: String = "") -> bool:
 
 @export var multishot_base_percent: float = 0.0
 @export var multishot_percent_per_step: float = 20.0
+
+# --- Chain lightning tuning (global) ---
+@export var chain_chance_base: float = 0.0          # 0..1
+@export var chain_chance_per_step: float = 0.05     # +5% per level
+@export var chain_chance_cap: float = 1.0
+
+@export var chain_damage_base_percent: float = 5.0  # starts at 5% of the triggering hit's final damage
+@export var chain_damage_percent_per_step: float = 5.0
+@export var chain_damage_cap_percent: float = 200.0
+
+@export var chain_jumps_base: int = 1               # must be able to jump to at least 1 other enemy
+@export var chain_jumps_per_step: int = 1
+
+@export var chain_radius_default: float = 5.0       # search radius for next chain target
 
 # ---------- STATE ----------
 var _upgrades_state: Dictionary = {}   # per-run (minerals) levels
@@ -338,6 +357,32 @@ func crit_mult_value() -> float:
 func next_crit_mult_value() -> float:
 	return clampf(crit_mult_base + crit_mult_per_step * float(total_level("crit_mult") + 1), 1.0, crit_mult_cap)
 
+# ---------- Chain lightning getters ----------
+# Proc chance (0..1)
+func chain_chance_value() -> float:
+	return clampf(chain_chance_base + chain_chance_per_step * float(total_level("chain_lightning_chance")), 0.0, chain_chance_cap)
+
+func next_chain_chance_value() -> float:
+	return clampf(chain_chance_base + chain_chance_per_step * float(total_level("chain_lightning_chance") + 1), 0.0, chain_chance_cap)
+
+# Chain damage as percent of the original hit's *final* damage
+func chain_damage_percent_value() -> float:
+	return clampf(chain_damage_base_percent + chain_damage_percent_per_step * float(total_level("chain_lightning_damage")), 0.0, chain_damage_cap_percent)
+
+func next_chain_damage_percent_value() -> float:
+	return clampf(chain_damage_base_percent + chain_damage_percent_per_step * float(total_level("chain_lightning_damage") + 1), 0.0, chain_damage_cap_percent)
+
+# Number of jumps (won't repeat targets)
+func chain_jumps_value() -> int:
+	return max(0, chain_jumps_base + chain_jumps_per_step * total_level("chain_lightning_jumps"))
+
+func next_chain_jumps_value() -> int:
+	return max(0, chain_jumps_base + chain_jumps_per_step * (total_level("chain_lightning_jumps") + 1))
+
+# Search radius (kept separate in case you add a radius upgrade later)
+func chain_radius_value() -> float:
+	return maxf(0.1, chain_radius_default)
+
 # ---------- Compatibility / hooks ----------
 func turret_damage_bonus() -> int: return turret_damage_value()
 func turret_damage_multiplier() -> float: return 1.0
@@ -360,7 +405,6 @@ func set_applied_override(id: String, value: int) -> void:
 func set_applied_override_map(m: Dictionary) -> void:
 	for k in m.keys():
 		_applied_override[String(k)] = int(m[k])
-
 
 func applied_for(id: String) -> int:
 	if _applied_override.has(id):

@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://dh6q12bqaxf52" path="res://scenes/mortar_tower.tscn" id="4_q7utx"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jy7pm"]
+albedo_color = Color(0.537011, 0.537011, 0.537011, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_uiyn6"]
 material = SubResource("StandardMaterial3D_jy7pm")

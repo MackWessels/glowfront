@@ -2,7 +2,7 @@ extends Node
 signal changed(current: int, max: int)
 signal defeated()
 
-@export var debug_prints: bool = true
+@export var debug_prints: bool = false
 @export var log_only_damage: bool = true   # true = only print on damage/defeat
 
 @export var base_max_hp: int = 50

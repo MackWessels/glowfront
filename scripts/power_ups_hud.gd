@@ -224,9 +224,10 @@ func _refresh_card(id: String) -> void:
 
 # ---------- category / naming ----------
 func _category_for(id: String) -> int:
-	# Offense: turret_* and crit_*; Base: spawner_*, base_*, and board_* (expansion upgrades)
-	if id.begins_with("turret_") or id.begins_with("crit_"):
+	# Offense: turret_*, crit_*, chain_lightning_*
+	if id.begins_with("turret_") or id.begins_with("crit_") or id.begins_with("chain_lightning"):
 		return TAB_OFFENSE
+	# Base: spawner_*, base_*, board_* (expansions)
 	if id.begins_with("spawner_") or id.begins_with("base_") or id.begins_with("board_"):
 		return TAB_BASE
 	# Fallback: treat unknowns as Offense (keeps them visible)
@@ -234,20 +235,29 @@ func _category_for(id: String) -> int:
 
 func _pretty_name(id: String) -> String:
 	match id:
-		"turret_damage":     return "Damage"
-		"turret_rate":       return "Attack Speed"
-		"turret_range":      return "Range"
-		"crit_chance":       return "Crit Chance"
-		"crit_mult":         return "Crit Damage"
-		"turret_multishot":  return "Multi-Shot"
-		"base_max_hp":       return "Max Health"
-		"base_regen":        return "Health Regen"
-		"spawner_health":    return "Spawner Health"
-		"board_add_left":    return "Board Add Right"
-		"board_add_right":   return "Board Add Left"
-		"board_push_back":   return "Board Push Back"
-		_:                   return id.capitalize()
+		"turret_damage":            return "Damage"
+		"turret_rate":              return "Attack Speed"
+		"turret_range":             return "Range"
+		"crit_chance":              return "Crit Chance"
+		"crit_mult":                return "Crit Damage"
+		"turret_multishot":         return "Multi-Shot"
 
+		# Chain Lightning
+		"chain_lightning_chance":   return "Chain Chance"
+		"chain_lightning_damage":   return "Chain Damage"
+		"chain_lightning_jumps":    return "Chain Jumps"
+
+		# Base / utility
+		"base_max_hp":              return "Max Health"
+		"base_regen":               return "Health Regen"
+		"spawner_health":           return "Spawner Health"
+
+		# Map expansions
+		"board_add_left":           return "Board Add Right"
+		"board_add_right":          return "Board Add Left"
+		"board_push_back":          return "Board Push Back"
+		_:
+			return id.capitalize()
 
 # ---------- values / formatting ----------
 func _value_line(id: String, current_level: int) -> String:
@@ -299,6 +309,34 @@ func _value_line(id: String, current_level: int) -> String:
 			if nxt_rem < 0: nxt_rem = 0
 
 			return "%d +%d%% → %d +%d%%" % [cur_base, cur_rem, nxt_base, nxt_rem]
+
+		# ---- Chain Lightning ----
+		"chain_lightning_chance":
+			var curc: float = 0.0
+			var nxtc: float = 0.0
+			if PowerUps.has_method("chain_chance_value"):
+				curc = PowerUps.chain_chance_value() * 100.0
+			if PowerUps.has_method("next_chain_chance_value"):
+				nxtc = PowerUps.next_chain_chance_value() * 100.0
+			return "%.0f%% → %.0f%%" % [curc, nxtc]
+
+		"chain_lightning_damage":
+			var curd: float = 0.0
+			var nxtd: float = 0.0
+			if PowerUps.has_method("chain_damage_percent_value"):
+				curd = PowerUps.chain_damage_percent_value()
+			if PowerUps.has_method("next_chain_damage_percent_value"):
+				nxtd = PowerUps.next_chain_damage_percent_value()
+			return "%.0f%% → %.0f%%" % [curd, nxtd]
+
+		"chain_lightning_jumps":
+			var curj: int = 0
+			var nxtj: int = 0
+			if PowerUps.has_method("chain_jumps_value"):
+				curj = PowerUps.chain_jumps_value()
+			if PowerUps.has_method("next_chain_jumps_value"):
+				nxtj = PowerUps.next_chain_jumps_value()
+			return "%d → %d" % [curj, nxtj]
 
 		"base_max_hp":
 			var hinfo: Dictionary = PowerUps.health_max_info()

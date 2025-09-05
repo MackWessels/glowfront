@@ -54,10 +54,8 @@ func _process(_dt: float) -> void:
 	else:
 		_mouse_down_last = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 
-
 func _exit_tree() -> void:
 	_ensure_cursor_orb(false)
-
 
 # ================= Public API (toolbar) =================
 # Called by toolbar buttons on mouse *down* (begin click-and-hold drag)
@@ -74,15 +72,12 @@ func arm_build(action: String) -> void:
 	_ensure_cursor_orb(true)
 	get_viewport().set_input_as_handled()
 
-
 # ================= Input (WORLD ONLY) =================
 func _unhandled_input(e: InputEvent) -> void:
 	if (_armed_action == "" and not _drag_active):
 		return
 	if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_RIGHT and e.pressed:
 		_exit_build_mode()
-
-
 
 # ================= Hover preview =================
 func _set_hover_tile(tile: Node) -> void:
@@ -130,23 +125,25 @@ func _collect_mortar_tiles(anchor: Node) -> Array[Node]:
 				result.append(t)
 	return result
 
-
 # ================= Place =================
 func _try_place_on_hover() -> void:
 	if _hover_tile == null:
 		_exit_build_mode()
 		return
-	if not _hover_tile.has_method("apply_placement"):
+	if _armed_action == "":
 		_exit_build_mode()
 		return
 
-	_hover_tile.call("apply_placement", _armed_action)
-
-	# Refresh flow/pathing
-	if _board and _board.has_method("_recompute_flow"):
-		var ok: bool = bool(_board.call("_recompute_flow"))
-		if typeof(ok) == TYPE_BOOL and not ok:
-			if _hover_tile.has_method("repair_tile"):
+	# >>> IMPORTANT: delegate placement to TileBoard so all path checks apply
+	if _board and _board.has_method("request_build_on_tile"):
+		_board.call("request_build_on_tile", _hover_tile, _armed_action)
+	else:
+		# Fallback (very old behavior, not recommended)
+		if _hover_tile.has_method("apply_placement"):
+			_hover_tile.call("apply_placement", _armed_action)
+		if _board and _board.has_method("_recompute_flow"):
+			var ok: bool = bool(_board.call("_recompute_flow"))
+			if typeof(ok) == TYPE_BOOL and not ok and _hover_tile.has_method("repair_tile"):
 				_hover_tile.call("repair_tile")
 
 	_exit_build_mode()
@@ -162,7 +159,6 @@ func _exit_build_mode() -> void:
 	_drag_active = false
 	_armed_action = ""
 	_ensure_cursor_orb(false)
-
 
 # ================= Picking =================
 func _ray_pick_tile() -> Node:
@@ -193,7 +189,6 @@ func _ray_pick_tile() -> Node:
 	while n and not n.has_method("apply_placement"):
 		n = n.get_parent()
 	return n
-
 
 # ================= Cursor orb =================
 func _ensure_cursor_orb(on: bool) -> void:
