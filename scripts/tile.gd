@@ -1,19 +1,20 @@
 extends StaticBody3D
 
-# ---------- Scenes / UI ----------
+# Scenes / UI
 @export var turret_scene: PackedScene
 @export var wall_scene: PackedScene
-@export var mortar_scene: PackedScene            # 2×2 mortar
+@export var mortar_scene: PackedScene        # 2×2 mortar
+@export var miner_scene: PackedScene         # 1×1 mineral generator
 @export var placement_menu: PopupMenu
 
 @onready var _tile_mesh: MeshInstance3D = $"TileMesh"
 var _orig_mat: Material = null
 
-# ---------- Pending highlight ----------
+# Hover highlight
 const PENDING_COLOR := Color(0.25, 0.55, 1.0)
-var _pending_mat: StandardMaterial3D = null
-var _pending_saved_mat: Material = null
-var _pending_on: bool = false
+var _pending_mat: StandardMaterial3D
+var _pending_saved_mat: Material
+var _pending_on := false
 
 func _get_pending_mat() -> StandardMaterial3D:
 	if _pending_mat == null:
@@ -24,46 +25,42 @@ func _get_pending_mat() -> StandardMaterial3D:
 	return _pending_mat
 
 func set_pending_blue(on: bool) -> void:
-	if not is_instance_valid(_tile_mesh):
-		return
-	if on:
-		if not _pending_on:
-			_pending_saved_mat = _tile_mesh.material_override
-			_tile_mesh.material_override = _get_pending_mat()
-			_pending_on = true
-	else:
-		if _pending_on:
-			_tile_mesh.material_override = _pending_saved_mat
-			_pending_saved_mat = null
-			_pending_on = false
+	if not is_instance_valid(_tile_mesh): return
+	if on and not _pending_on:
+		_pending_saved_mat = _tile_mesh.material_override
+		_tile_mesh.material_override = _get_pending_mat()
+		_pending_on = true
+	elif not on and _pending_on:
+		_tile_mesh.material_override = _pending_saved_mat
+		_pending_saved_mat = null
+		_pending_on = false
 
-# ---------- Grid / state ----------
-var grid_x: int = 0
-var grid_z: int = 0
+# Grid / state
+var grid_x := 0
+var grid_z := 0
 var grid_position: Vector2i:
 	get: return Vector2i(grid_x, grid_z)
 	set(v):
 		grid_x = v.x
 		grid_z = v.y
 
-var tile_board: Node = null
-var has_turret: bool = false
-var is_wall: bool = false
-var blocked: bool = false
-var is_broken: bool = false
-var placed_object: Node = null
+var tile_board: Node
+var has_turret := false
+var is_wall := false
+var blocked := false
+var is_broken := false
+var placed_object: Node
 
-# ---------- Multi-tile mortar ----------
+# Mortar footprint
 const FP_NONE := Vector2i(-1, -1)
-const MORTAR_FOOT := Vector2i(2, 2)              # (x, z)
-var occupied_by_anchor: Vector2i = FP_NONE       # FP_NONE if not part of a mortar footprint
+const MORTAR_FOOT := Vector2i(2, 2)         # (x, z)
+var occupied_by_anchor: Vector2i = FP_NONE  # != FP_NONE if claimed by a mortar
 
-# ---------- Lifecycle ----------
 func _ready() -> void:
 	if is_instance_valid(_tile_mesh) and _orig_mat == null:
 		_orig_mat = _tile_mesh.material_override
 
-func _input_event(cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _shape: int) -> void:
+func _input_event(_cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _shape: int) -> void:
 	if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_RIGHT and e.pressed:
 		if tile_board:
 			tile_board.set("active_tile", self)
@@ -73,7 +70,9 @@ func _input_event(cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _sha
 				placement_menu.add_item("Repair", 2)
 			elif not has_turret and not is_wall:
 				placement_menu.add_item("Place Turret", 0)
-				placement_menu.add_item("Place Wall", 1)
+				placement_menu.add_item("Place Wall",   1)
+				if miner_scene != null:
+					placement_menu.add_item("Place Miner", 4)
 				if mortar_scene != null:
 					placement_menu.add_item("Place Mortar (2x2)", 3)
 			if placement_menu.item_count > 0:
@@ -82,13 +81,11 @@ func _input_event(cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _sha
 
 # ---------- 1×1 placements ----------
 func place_turret() -> void:
-	if is_broken or turret_scene == null:
-		return
+	if is_broken or turret_scene == null: return
 	_clear_existing_object()
-	var t: Node = turret_scene.instantiate()
+	var t := turret_scene.instantiate()
 	add_child(t)
-	if t is Node3D:
-		(t as Node3D).global_transform = global_transform
+	if t is Node3D: (t as Node3D).global_transform = global_transform
 	placed_object = t
 	has_turret = true
 	set_wall(true)
@@ -97,14 +94,27 @@ func place_turret() -> void:
 	set_pending_blue(false)
 
 func place_wall() -> void:
-	if is_broken or wall_scene == null:
-		return
+	if is_broken or wall_scene == null: return
 	_clear_existing_object()
-	var w: Node = wall_scene.instantiate()
+	var w := wall_scene.instantiate()
 	add_child(w)
-	if w is Node3D:
-		(w as Node3D).global_transform = global_transform
+	if w is Node3D: (w as Node3D).global_transform = global_transform
 	placed_object = w
+	set_wall(true)
+	blocked = true
+	is_broken = false
+	set_pending_blue(false)
+
+func place_miner() -> void:
+	if is_broken or miner_scene == null: return
+	_clear_existing_object()
+	var m := miner_scene.instantiate()
+	add_child(m)
+	if m is Node3D: (m as Node3D).global_transform = global_transform
+	if m and m.has_method("set_tile_context"):
+		m.call("set_tile_context", tile_board, grid_position)
+	placed_object = m
+	has_turret = true   # treated as blocking building
 	set_wall(true)
 	blocked = true
 	is_broken = false
@@ -112,40 +122,34 @@ func place_wall() -> void:
 
 # ---------- 2×2 mortar placement ----------
 func place_mortar() -> void:
-	if is_broken or mortar_scene == null:
-		return
-	var board: Node = tile_board
-	if board == null:
-		return
+	if is_broken or mortar_scene == null: return
+	var board := tile_board
+	if board == null: return
 
 	var tiles_v: Variant = board.get("tiles")
-	if typeof(tiles_v) != TYPE_DICTIONARY:
-		return
+	if typeof(tiles_v) != TYPE_DICTIONARY: return
 	var tiles: Dictionary = tiles_v
+	var anchor := grid_position
 
-	var anchor: Vector2i = grid_position
-
-	# Validate footprint
+	# validate footprint
 	for dx in range(MORTAR_FOOT.x):
 		for dz in range(MORTAR_FOOT.y):
 			var c := Vector2i(anchor.x + dx, anchor.y + dz)
-			if not tiles.has(c):
-				return
+			if not tiles.has(c): return
 			var t: Node = tiles[c]
 			if t == null: return
 			if bool(t.get("is_broken")): return
 			if bool(t.get("blocked")): return
 			if bool(t.get("has_turret")): return
 			var occ_v: Variant = t.get("occupied_by_anchor")
-			if typeof(occ_v) == TYPE_VECTOR2I and Vector2i(occ_v) != FP_NONE:
-				return
+			if typeof(occ_v) == TYPE_VECTOR2I and Vector2i(occ_v) != FP_NONE: return
 
-	# Claim footprint
+	# claim footprint
 	for dx in range(MORTAR_FOOT.x):
 		for dz in range(MORTAR_FOOT.y):
 			var c2 := Vector2i(anchor.x + dx, anchor.y + dz)
 			var t2: Node = tiles[c2]
-			if t2 != null:
+			if t2:
 				t2.set("blocked", true)
 				t2.set("has_turret", true)
 				t2.set("is_wall", true)
@@ -154,16 +158,14 @@ func place_mortar() -> void:
 				if t2.has_method("set_pending_blue"):
 					t2.call("set_pending_blue", false)
 
-	# Spawn mortar visual on the anchor and center over 2×2
+	# spawn mortar centered on 2×2
 	_clear_existing_object()
-	var mortar: Node = mortar_scene.instantiate()
+	var mortar := mortar_scene.instantiate()
 	add_child(mortar)
 	if mortar is Node3D:
-		var step: float = 0.0
-		if board.has_method("tile_world_size"):
-			step = float(board.call("tile_world_size"))
-		elif board.has("tile_size"):
-			step = float(board.get("tile_size"))
+		var step := 0.0
+		if board.has_method("tile_world_size"): step = float(board.call("tile_world_size"))
+		elif board.has("tile_size"):            step = float(board.get("tile_size"))
 		if step > 0.0:
 			(mortar as Node3D).global_position = global_position + Vector3(step * 0.5, 0.0, step * 0.5)
 		else:
@@ -181,9 +183,7 @@ func set_wall(v: bool) -> void:
 	is_wall = v
 
 func is_walkable() -> bool:
-	# Any tile that is blocked OR part of a claimed footprint is non-walkable
-	if occupied_by_anchor != FP_NONE:
-		return false
+	if occupied_by_anchor != FP_NONE: return false
 	return not blocked
 
 func apply_placement(action: String) -> void:
@@ -191,6 +191,7 @@ func apply_placement(action: String) -> void:
 		"turret": place_turret()
 		"wall":   place_wall()
 		"mortar": place_mortar()
+		"miner":  place_miner()
 		"repair": repair_tile()
 
 func break_tile() -> void:
@@ -202,30 +203,27 @@ func break_tile() -> void:
 	set_pending_blue(false)
 	_tint_tile_red()
 
-# Called by “Repair” and by sell logic to free any footprint.
 func repair_tile() -> void:
-	var board: Node = tile_board
+	var board := tile_board
 	if board == null:
-		_reset_single()
-		return
+		_reset_single(); return
 
 	var tiles_v: Variant = board.get("tiles")
 	if typeof(tiles_v) != TYPE_DICTIONARY:
-		_reset_single()
-		return
+		_reset_single(); return
 	var tiles: Dictionary = tiles_v
 
-	var anchor: Vector2i = (occupied_by_anchor if occupied_by_anchor != FP_NONE else grid_position)
+	var anchor := (occupied_by_anchor if occupied_by_anchor != FP_NONE else grid_position)
 	var is_mortar := (occupied_by_anchor != FP_NONE) or _is_mortar_anchor(tiles, anchor)
-	var sx: int = (MORTAR_FOOT.x if is_mortar else 1)
-	var sz: int = (MORTAR_FOOT.y if is_mortar else 1)
+	var sx := (MORTAR_FOOT.x if is_mortar else 1)
+	var sz := (MORTAR_FOOT.y if is_mortar else 1)
 
 	for dx in range(sx):
 		for dz in range(sz):
 			var c := Vector2i(anchor.x + dx, anchor.y + dz)
 			if tiles.has(c):
 				var t: Node = tiles[c]
-				if t != null:
+				if t:
 					t.set("blocked", false)
 					t.set("is_wall", false)
 					t.set("has_turret", false)
@@ -264,8 +262,6 @@ func _restore_tile_material() -> void:
 		_tile_mesh.material_override = _orig_mat
 
 func _is_mortar_anchor(tiles: Dictionary, a: Vector2i) -> bool:
-	# If any cell in the 2×2 points its 'occupied_by_anchor' to 'a' (and isn't a),
-	# consider 'a' the anchor cell.
 	for dx in range(MORTAR_FOOT.x):
 		for dz in range(MORTAR_FOOT.y):
 			var c := Vector2i(a.x + dx, a.y + dz)

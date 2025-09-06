@@ -5,11 +5,9 @@ signal added(amount: int, source: String)
 signal spent(amount: int, reason: String)
 
 var _balance: int = 0
-var _ready_called: bool = false
 
 func setup(starting: int = 50) -> void:
 	_balance = max(0, starting)
-	_ready_called = true
 	balance_changed.emit(_balance)
 
 func balance() -> int:
@@ -28,9 +26,26 @@ func try_spend(cost: int, reason: String = "") -> bool:
 		return true
 	return false
 
+# Sugar for callers that expect 'spend' instead of 'try_spend'
+func spend(cost: int, reason: String = "") -> bool:
+	return try_spend(cost, reason)
+
 func add(amount: int, source: String = "") -> void:
 	if amount == 0:
 		return
 	_balance += amount
 	added.emit(amount, source)
 	balance_changed.emit(_balance)
+
+# Sugar for callers that expect 'earn'
+func earn(amount: int, source: String = "") -> void:
+	add(amount, source)
+
+# Useful for debug / refunds / direct overrides
+func set_amount(value: int) -> void:
+	_balance = max(0, value)
+	balance_changed.emit(_balance)
+
+# Sugar for callers that expect 'set_balance'
+func set_balance(value: int) -> void:
+	set_amount(value)

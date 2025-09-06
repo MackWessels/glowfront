@@ -6,11 +6,15 @@ func _ready() -> void:
 	if typeof(Economy) != TYPE_NIL and Economy.has_method("setup"):
 		Economy.setup(starting_balance)
 
-# --- Thin wrappers so other scripts can talk to us or Economy interchangeably ---
-func earn(amount: int) -> void:
+# New: unified way to increase minerals
+func add(amount: int, source: String = "") -> void:
 	if amount <= 0: return
-	if typeof(Economy) != TYPE_NIL and Economy.has_method("earn"):
-		Economy.earn(amount)
+	if typeof(Economy) != TYPE_NIL and Economy.has_method("add"):
+		Economy.add(amount, source)
+
+# New: keep earn(), but route it to add()
+func earn(amount: int, source: String = "") -> void:
+	add(amount, source)
 
 func spend(amount: int) -> bool:
 	if amount <= 0: return true

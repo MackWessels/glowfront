@@ -1,22 +1,31 @@
 extends Node
 
-# ------------ Scene refs (optional) ------------
+# -------- Scene refs (optional) --------
 @export var tile_board_path: NodePath
 @export var camera_path: NodePath
+@export var drop_layer_path: NodePath                    # BuildDropLayer (Control) — optional
 
-# ------------ Picking / layers ------------
-const TILE_LAYER_MASK := 1 << 3  # layer 4
-const CURSOR_PX := 22            # cursor orb size (px)
+# Optional toolbar buttons. If set, we’ll auto-connect them.
+@export var turret_button_path: NodePath
+@export var wall_button_path: NodePath
+@export var miner_button_path: NodePath
+@export var mortar_button_path: NodePath
 
-# ------------ State ------------
+# -------- Picking / layers --------
+const TILE_LAYER_MASK := 1 << 3   # layer 4
+const CURSOR_PX := 22
+
+# -------- State --------
 var _board: Node = null
 var _cam: Camera3D = null
+var _drop: Node = null
 
-var _armed_action: String = ""     # "", "turret", "wall", "mortar"
+# Actions: "", "turret", "wall", "miner", "mortar"
+var _armed_action: String = ""
 var _drag_active: bool = false
 
 var _hover_tile: Node = null
-var _hover_tiles: Array[Node] = []  # multi-tile preview (mortar)
+var _hover_tiles: Array[Node] = []   # multi-tile preview (mortar)
 
 var _cursor_orb: TextureRect = null
 var _mouse_down_last: bool = false
@@ -35,18 +44,81 @@ func _ready() -> void:
 	if _cam == null:
 		_cam = get_viewport().get_camera_3d()
 
-	set_process(true)  # for cursor orb follow
+	# Drop layer (optional)
+	if drop_layer_path != NodePath(""):
+		_drop = get_node_or_null(drop_layer_path)
 
+	# Auto-wire toolbar buttons (optional)
+	_wire_button(turret_button_path, "turret")
+	_wire_button(wall_button_path,   "wall")
+	_wire_button(miner_button_path,  "miner")
+	_wire_button(mortar_button_path, "mortar")
+
+	set_process(true)
+
+func _wire_button(p: NodePath, action: String) -> void:
+	if p == NodePath(""):
+		return
+	var n := get_node_or_null(p)
+	if n == null:
+		return
+	# If it’s a BaseButton, hook both quick-click and click-and-hold.
+	var bb := n as BaseButton
+	if bb:
+		if not bb.is_connected("button_down", Callable(self, "_on_toolbar_button_down")):
+			bb.button_down.connect(_on_toolbar_button_down.bind(action))
+		if not bb.is_connected("pressed", Callable(self, "_on_toolbar_pressed")):
+			bb.pressed.connect(_on_toolbar_pressed.bind(action))
+	else:
+		# Fallback: connect generic gui_input for mousedown
+		if not n.is_connected("gui_input", Callable(self, "_on_toolbar_gui_input")):
+			n.gui_input.connect(_on_toolbar_gui_input.bind(action))
+
+func _on_toolbar_button_down(action: String) -> void:
+	# Start a drag (click-and-hold). Ask drop layer to capture.
+	if _drop and _drop.has_method("enable_drag_capture"):
+		_drop.call("enable_drag_capture")
+	begin_drag(action)
+
+func _on_toolbar_pressed(action: String) -> void:
+	# Quick-click: arm build without drag.
+	arm_build(action)
+
+func _on_toolbar_gui_input(ev: InputEvent, action: String) -> void:
+	var mb := ev as InputEventMouseButton
+	if mb and mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+		if _drop and _drop.has_method("enable_drag_capture"):
+			_drop.call("enable_drag_capture")
+		begin_drag(action)
+
+# ================= Public API (toolbar / menus) =================
+func begin_drag(action: String) -> void:
+	if not _is_valid_action(action):
+		return
+	_armed_action = action
+	_drag_active = true
+	_ensure_cursor_orb(true)
+	get_viewport().set_input_as_handled()
+
+func arm_build(action: String) -> void:
+	if not _is_valid_action(action):
+		return
+	_armed_action = action
+	_drag_active = false
+	_ensure_cursor_orb(true)
+	get_viewport().set_input_as_handled()
+
+func _is_valid_action(a: String) -> bool:
+	return a == "turret" or a == "wall" or a == "miner" or a == "mortar"
+
+# ================= Per-frame =================
 func _process(_dt: float) -> void:
-	# follow the cursor
 	if _cursor_orb:
 		_cursor_orb.position = get_viewport().get_mouse_position() - Vector2(CURSOR_PX, CURSOR_PX)
 
-	# update hover every frame
 	if _armed_action != "" or _drag_active:
 		_set_hover_tile(_ray_pick_tile())
 
-		# place on global mouse-up (even if UI consumed the event)
 		var down := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		if _mouse_down_last and not down:
 			_try_place_on_hover()
@@ -57,26 +129,12 @@ func _process(_dt: float) -> void:
 func _exit_tree() -> void:
 	_ensure_cursor_orb(false)
 
-# ================= Public API (toolbar) =================
-# Called by toolbar buttons on mouse *down* (begin click-and-hold drag)
-func begin_drag(action: String) -> void:
-	_armed_action = action
-	_drag_active = true
-	_ensure_cursor_orb(true)
-	get_viewport().set_input_as_handled()   # let the button stay happy
-
-# Optional: quick-click to arm (without hold)
-func arm_build(action: String) -> void:
-	_armed_action = action
-	_drag_active = false
-	_ensure_cursor_orb(true)
-	get_viewport().set_input_as_handled()
-
 # ================= Input (WORLD ONLY) =================
 func _unhandled_input(e: InputEvent) -> void:
 	if (_armed_action == "" and not _drag_active):
 		return
-	if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_RIGHT and e.pressed:
+	var mb := e as InputEventMouseButton
+	if mb and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 		_exit_build_mode()
 
 # ================= Hover preview =================
@@ -86,16 +144,15 @@ func _set_hover_tile(tile: Node) -> void:
 			t.call("set_pending_blue", false)
 	_hover_tiles.clear()
 	_hover_tile = tile
-
 	if tile == null:
 		return
 
 	if _armed_action == "mortar":
 		var cells := _collect_mortar_tiles(tile)
-		for t in cells:
-			if t and t.has_method("set_pending_blue"):
-				t.call("set_pending_blue", true)
-			_hover_tiles.append(t)
+		for t2 in cells:
+			if t2 and t2.has_method("set_pending_blue"):
+				t2.call("set_pending_blue", true)
+			_hover_tiles.append(t2)
 	else:
 		if tile.has_method("set_pending_blue"):
 			tile.call("set_pending_blue", true)
@@ -127,18 +184,15 @@ func _collect_mortar_tiles(anchor: Node) -> Array[Node]:
 
 # ================= Place =================
 func _try_place_on_hover() -> void:
-	if _hover_tile == null:
-		_exit_build_mode()
-		return
-	if _armed_action == "":
+	if _hover_tile == null or _armed_action == "":
 		_exit_build_mode()
 		return
 
-	# >>> IMPORTANT: delegate placement to TileBoard so all path checks apply
+	# Delegate placement + path checks to TileBoard.
 	if _board and _board.has_method("request_build_on_tile"):
 		_board.call("request_build_on_tile", _hover_tile, _armed_action)
 	else:
-		# Fallback (very old behavior, not recommended)
+		# Fallback if board doesn’t expose the helper.
 		if _hover_tile.has_method("apply_placement"):
 			_hover_tile.call("apply_placement", _armed_action)
 		if _board and _board.has_method("_recompute_flow"):
@@ -149,7 +203,6 @@ func _try_place_on_hover() -> void:
 	_exit_build_mode()
 
 func _exit_build_mode() -> void:
-	# clear preview
 	for t in _hover_tiles:
 		if t and t.has_method("set_pending_blue"):
 			t.call("set_pending_blue", false)

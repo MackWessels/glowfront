@@ -172,10 +172,22 @@ layout_mode = 2
 text = "Turret"
 script = ExtResource("8_85g3d")
 
-[node name="TurretButtonHeavy" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
+[node name="MortarButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
 layout_mode = 2
 text = "Heavy"
 script = ExtResource("8_85g3d")
 action_name = "mortar"
+
+[node name="MinerButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
+layout_mode = 2
+text = "Miner"
+script = ExtResource("8_85g3d")
+action_name = "miner"
+
+[node name="WallButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
+layout_mode = 2
+text = "Wall"
+script = ExtResource("8_85g3d")
+action_name = "wall"
 
 [connection signal="resized" from="GameOver" to="GameOver" method="_on_resized"]
