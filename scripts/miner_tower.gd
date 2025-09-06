@@ -76,16 +76,20 @@ func _start_loop() -> void:
 	_running = true
 	await get_tree().process_frame
 	if initial_delay > 0.0:
-		await get_tree().create_timer(max(0.0, initial_delay)).timeout
+		await get_tree().create_timer(maxf(0.0, initial_delay)).timeout
 	while _running:
 		_do_pulse()
-		await get_tree().create_timer(max(0.05, tick_interval)).timeout
+		var interval: float = maxf(0.05, tick_interval * _miner_speed_scale())
+		await get_tree().create_timer(interval).timeout
+
 
 func _do_pulse() -> void:
-	var amt: int = max(0, minerals_per_tick)
-	if amt <= 0: return
-	_add_minerals(amt)
+	var amt: int = max(0, minerals_per_tick + _miner_yield_bonus())
+	if amt <= 0:
+		return
+	Economy.add(amt, "miner_tick")
 	_generated_total += amt
+
 
 # ====================== Economy helpers ========================
 func _resolve_minerals() -> void:
@@ -279,3 +283,19 @@ func _refresh_stats_text() -> void:
 	s += "  Generated total: " + str(_generated_total) + "\n"
 	s += "\nSell refund: " + str(refund_preview) + " (" + str(sell_refund_percent) + "% of local spend)"
 	_stats_label.text = s
+
+# --- add these helpers somewhere near the top of miner_tower.gd ---
+func _pu() -> Node:
+	return get_node_or_null("/root/PowerUps")
+
+func _miner_yield_bonus() -> int:
+	var pu := _pu()
+	if pu and pu.has_method("miner_yield_bonus"):
+		return int(pu.call("miner_yield_bonus"))
+	return 0
+
+func _miner_speed_scale() -> float:
+	var pu := _pu()
+	if pu and pu.has_method("miner_speed_scale"):
+		return float(pu.call("miner_speed_scale"))
+	return 1.0

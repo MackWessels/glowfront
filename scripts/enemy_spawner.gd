@@ -44,23 +44,33 @@ class_name EnemySpawner
 @export var lvl4_w_per_wave: float = 0.15
 
 # ---------------- Speed control (ONLY 'speed') ----------------
-@export var base_speed: float = 2.0            # matches Enemy default
-@export var speed_per_wave_pct: float = 0.08   # +8% per wave
+@export var base_speed: float = 2.0
+@export var speed_per_wave_pct: float = 0.08
 @export var lvl2_speed_mult: float = 1.05
 @export var lvl3_speed_mult: float = 1.12
 @export var lvl4_speed_mult: float = 1.20
-@export var speed_jitter_pct: float = 0.0      # keep simple; set >0 for spice
+@export var speed_jitter_pct: float = 0.0
 @export var clamp_speed_min: float = 0.25
 @export var clamp_speed_max: float = 20.0
+
+# ---------------- Debug ----------------
+@export var debug_waves: bool = true
 
 # ---------------- State ----------------
 var _board: Node = null
 var _timer: Timer
 var _phase_timer: Timer
-var _phase: String = "idle"      # "spawning" | "cooldown" | "idle"
+var _phase: String = "idle"          # "spawning" | "cooldown" | "idle"
 var _paused: bool = false
 var _alive: int = 0
 var _wave_remaining: int = 0
+
+# Per-wave bookkeeping (for stipend & perfect bonus)
+var _wave_total_spawned: int = 0      # how many we actually spawned this wave
+var _wave_resolved: int = 0           # killed or leaked
+var _wave_leaks: int = 0
+var _wave_kill_payout: int = 0        # integer minerals granted from kills (post-bounty, pre-perfect)
+var _wave_awarded: bool = false       # ensure perfect bonus pays once
 
 # =====================================================================
 # Lifecycle
@@ -106,6 +116,7 @@ func start_spawning() -> void:
 		_timer.start()
 	if _phase != "spawning":
 		_phase = "spawning"
+		_begin_wave()  # <- stipend + reset counters
 		_wave_remaining = _calc_wave_total()
 		_frontload_wave()
 		_phase_timer.start(maxf(0.1, wave_time_sec))
@@ -138,6 +149,7 @@ func _on_phase_timer() -> void:
 	elif _phase == "cooldown":
 		wave_index += 1
 		_phase = "spawning"
+		_begin_wave()
 		_wave_remaining = _calc_wave_total()
 		_frontload_wave()
 		_phase_timer.start(maxf(0.1, wave_time_sec))
@@ -212,7 +224,7 @@ func _spawn_one() -> void:
 	if inst.has_signal("died"):
 		inst.died.connect(_on_enemy_died)
 
-	# level + stats (HP + speed only; attack/mass fixed here for now)
+	# level + stats
 	var lvl: int = _pick_level_for_wave(wave_index)
 	if inst.has_method("set_level"):
 		inst.call("set_level", lvl)
@@ -240,16 +252,68 @@ func _spawn_one() -> void:
 		inst3.look_at(inst3.global_position + fwd, Vector3.UP)
 
 	_alive += 1
+	_wave_total_spawned += 1
 
 # =====================================================================
 # Callbacks
 # =====================================================================
 func _on_enemy_died() -> void:
 	_alive = max(0, _alive - 1)
+	_wave_resolved += 1
+	_maybe_award_wave_end()
+
+# Called by Enemy when it reaches the goal (see tiny Enemy tweak below)
+func notify_leak(enemy: Node = null) -> void:
+	_wave_leaks += 1
+	_wave_resolved += 1
+	if debug_waves:
+		print("[Wave] leak registered; leaks=", _wave_leaks)
+	_maybe_award_wave_end()
+
+# Called by Enemy after it awarded bounty to Economy.
+func notify_kill_payout(amount: int) -> void:
+	if amount > 0:
+		_wave_kill_payout += amount
+		if debug_waves:
+			print("[Wave] kill payout +", amount, "  wave_kill_payout=", _wave_kill_payout)
 
 # =====================================================================
 # Helpers
 # =====================================================================
+func _maybe_award_wave_end() -> void:
+	if _wave_awarded:
+		return
+	# Consider a wave "fully resolved" once we've spawned everyone
+	# AND every spawned enemy is either killed or leaked.
+	var spawned_all: bool = (_wave_remaining <= 0 and _phase != "spawning")
+	var resolved_all: bool = (_wave_resolved >= _wave_total_spawned)
+	if not (spawned_all and resolved_all):
+		return
+
+	_wave_awarded = true
+	if _wave_leaks == 0 and _wave_kill_payout > 0:
+		var bonus: int = 0
+		if typeof(PowerUps) != TYPE_NIL and PowerUps.has_method("award_perfect_bonus"):
+			bonus = int(PowerUps.award_perfect_bonus(_wave_kill_payout, "perfect_wave"))
+		if debug_waves:
+			print("[Wave] PERFECT! wave=", wave_index, " base=", _wave_kill_payout, " bonus=", bonus)
+	else:
+		if debug_waves:
+			print("[Wave] resolved (not perfect). wave=", wave_index, " kills_base=", _wave_kill_payout, " leaks=", _wave_leaks)
+
+func _begin_wave() -> void:
+	_wave_total_spawned = 0
+	_wave_resolved = 0
+	_wave_leaks = 0
+	_wave_kill_payout = 0
+	_wave_awarded = false
+
+	# Stipend at wave start
+	if typeof(PowerUps) != TYPE_NIL and PowerUps.has_method("award_wave_stipend"):
+		var amt: int = int(PowerUps.award_wave_stipend(wave_index))
+		if debug_waves and amt > 0:
+			print("[Wave] stipend paid: +", amt, " at start of wave ", wave_index)
+
 func _tile_w() -> float:
 	if _board and _board.has_method("tile_world_size"):
 		return float(_board.call("tile_world_size"))

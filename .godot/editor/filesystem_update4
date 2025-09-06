@@ -12,12 +12,9 @@ res://scenes/tower.tscn
 res://scenes/mortar_tower.tscn
 res://scenes/mortar_shell.tscn
 res://scenes/miner_tower.tscn
-res://scripts/miner_tower.gd
-res://scripts/placement_menu.gd
-res://scripts/BuildManager.gd
-res://scripts/build_drop_layer.gd
-res://scripts/tile.gd
-res://scripts/tile_board.gd
 res://scripts/economy.gd
-res://scripts/minerals.gd
-res://scripts/TurretButton.gd
+res://scripts/miner_tower.gd
+res://scripts/power_ups.gd
+res://scripts/power_ups_hud.gd
+res://scripts/enemy.gd
+res://scripts/enemy_spawner.gd

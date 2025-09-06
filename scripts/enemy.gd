@@ -1,7 +1,7 @@
 extends CharacterBody3D
 class_name Enemy
 
-# -------- Movement (unchanged) --------
+# -------- Movement --------
 @export var speed: float = 2.0
 @export var accel: float = 22.0
 @export var turn_speed_deg: float = 540.0
@@ -22,7 +22,7 @@ class_name Enemy
 @export var attack: int = 1
 @export var mass: float = 1.0
 
-# Rewards/flags from spawner (fixed by color; not wave-scaled)
+# Rewards/flags from spawner (fixed per color; not wave-scaled)
 @export var mineral_reward: int = 1
 @export var is_elite: bool = false
 
@@ -36,6 +36,7 @@ var _level: int = 1
 		return _level
 
 signal died
+signal damaged(by, amount: int, killed: bool)
 
 var _board: Node = null
 var _goal: Node3D = null
@@ -74,6 +75,7 @@ var _dead: bool = false
 # Track board path version (if board exposes one)
 var _last_path_version: int = -1
 
+# ============================ Lifecycle ============================
 func _ready() -> void:
 	add_to_group("enemy")
 	motion_mode = CharacterBody3D.MOTION_MODE_FLOATING
@@ -128,14 +130,11 @@ func apply_stats(s: Dictionary) -> void:
 	if s.has("mass"):   mass   = float(s["mass"])
 	if s.has("speed"):  speed  = float(s["speed"])
 
-
-# ---------------- Combat ----------------
-signal damaged(by, amount: int, killed: bool)
-
+# ============================ Combat ============================
 func take_damage(ctx: Dictionary) -> void:
 	var by: Node = ctx.get("by", null) as Node
 
-	# Prefer precomputed damage 
+	# Prefer precomputed final damage
 	var dmg: int = -1
 	if ctx.has("final"):
 		dmg = int(ctx["final"])
@@ -159,14 +158,28 @@ func take_damage(ctx: Dictionary) -> void:
 	if killed:
 		_die(true)
 
-
 func _die(killed: bool) -> void:
 	if _dead:
 		return
 	_dead = true
 
 	if killed:
-		_award_minerals(mineral_reward)
+		# ---- Minerals (via PowerUps, which handles bounty bonus & carry) ----
+		var payout: int = 0
+		if typeof(PowerUps) != TYPE_NIL and PowerUps.has_method("award_bounty"):
+			var info: Dictionary = PowerUps.award_bounty(max(0, mineral_reward), "kill")
+			payout = int(info.get("payout", 0))
+		else:
+			# Fallback if PowerUps not present
+			payout = max(0, mineral_reward)
+			_award_minerals(payout)
+
+		# Notify spawner so it can tally this wave's payouts (for perfect bonus)
+		var spawner := get_parent()
+		if spawner and spawner.has_method("notify_kill_payout"):
+			spawner.notify_kill_payout(payout)
+
+		# ---- Shards (unchanged) ----
 		var shards: Node = get_node_or_null("/root/Shards")
 		if shards != null:
 			if shards.has_method("award_for_enemy"):
@@ -178,31 +191,15 @@ func _die(killed: bool) -> void:
 	emit_signal("died")
 	queue_free()
 
-func _award_minerals(amount: int) -> void:
-	if amount <= 0: return
-	if typeof(Economy) != TYPE_NIL:
-		if Economy.has_method("earn"): Economy.earn(amount); return
-		if Economy.has_method("add"): Economy.add(amount); return
-		if Economy.has_method("deposit"): Economy.deposit(amount); return
-		if Economy.has_method("set_amount") and Economy.has_method("balance"):
-			Economy.set_amount(int(Economy.balance()) + amount); return
-		var bv: Variant = Economy.get("minerals")
-		if typeof(bv) == TYPE_INT:
-			Economy.set("minerals", int(bv) + amount); return
-	var econ: Node = get_node_or_null("/root/Minerals")
-	if econ != null:
-		if econ.has_method("earn"): econ.call("earn", amount); return
-		if econ.has_method("add"): econ.call("add", amount); return
-		if econ.has_method("set_amount"):
-			var cur: int = 0
-			var v: Variant = econ.get("minerals")
-			if typeof(v) == TYPE_INT: cur = int(v)
-			econ.call("set_amount", cur + amount); return
-		var bv2: Variant = econ.get("minerals")
-		if typeof(bv2) == TYPE_INT:
-			econ.set("minerals", int(bv2) + amount); return
+# ============================ Goal / Leak ============================
+func _on_reach_goal() -> void:
+	# Tell the spawner we leaked before removing ourselves.
+	var spawner := get_parent()
+	if spawner and spawner.has_method("notify_leak"):
+		spawner.notify_leak(self)
+	_die(false)  # no rewards on leak
 
-# ---------------- Helpers ----------------
+# ============================ Helpers ============================
 func _apply_y_lock(p: Vector3) -> Vector3:
 	p.y = _y_plane
 	return p
@@ -256,7 +253,7 @@ func _get_board_path_version() -> int:
 	var v: Variant = _board.get("path_version")
 	return int(v) if typeof(v) in [TYPE_INT, TYPE_FLOAT] else _last_path_version
 
-# ---------------- Planning (unchanged pathing, stronger refresh) ----------------
+# ---------------- Planning / Path ----------------
 func _plan_from_cell(c: Vector2i) -> void:
 	var n: Vector2i = _next_from(c)
 	_planned_next = n
@@ -302,7 +299,7 @@ func _accelerate_toward(v: Vector3, target_v: Vector3, a: float, dt: float) -> V
 
 # ---------------- Physics ----------------
 func _physics_process(delta: float) -> void:
-	# If the board exposes a path_version, replan on change.
+	# Replan when the board says the path changed.
 	var pv: int = _get_board_path_version()
 	if pv != _last_path_version:
 		_last_path_version = pv
@@ -322,7 +319,6 @@ func _physics_process(delta: float) -> void:
 		if L <= _entry_radius:
 			_entry_active = false
 			velocity = Vector3.ZERO
-			# snap to current route right away to avoid using any stale plan
 			_cur_cell = _board_cell_of_pos(global_position)
 			_lane_initialized = false
 			_plan_from_cell(_cur_cell)
@@ -386,20 +382,42 @@ func _update_facing_toward(dir_or_vec: Vector3, delta: float) -> void:
 	rotate_y(angle)
 
 func _on_board_changed() -> void:
-	# force immediate replan when the board says the path changed
 	_last_path_version = _get_board_path_version()
 	_lane_initialized = false
 	_cur_cell = _board_cell_of_pos(global_position)
 	_plan_from_cell(_cur_cell)
 
-func _on_reach_goal() -> void:
-	_die(false)  # no rewards on leak
-
+# ---------------- Tile size ----------------
 func _get_tile_w() -> float:
 	if _board and _board.has_method("tile_world_size"):
 		return float(_board.call("tile_world_size"))
 	var tv: Variant = _board.get("tile_size") if _board else 1.0
 	return float(tv) if (typeof(tv) == TYPE_FLOAT or typeof(tv) == TYPE_INT) else 1.0
+
+# ---------------- Fallback econ (used only if PowerUps missing) ----------------
+func _award_minerals(amount: int) -> void:
+	if amount <= 0: return
+	if typeof(Economy) != TYPE_NIL:
+		if Economy.has_method("earn"): Economy.earn(amount); return
+		if Economy.has_method("add"): Economy.add(amount); return
+		if Economy.has_method("deposit"): Economy.deposit(amount); return
+		if Economy.has_method("set_amount") and Economy.has_method("balance"):
+			Economy.set_amount(int(Economy.balance()) + amount); return
+		var bv: Variant = Economy.get("minerals")
+		if typeof(bv) == TYPE_INT:
+			Economy.set("minerals", int(bv) + amount); return
+	var econ: Node = get_node_or_null("/root/Minerals")
+	if econ != null:
+		if econ.has_method("earn"): econ.call("earn", amount); return
+		if econ.has_method("add"): econ.call("add", amount); return
+		if econ.has_method("set_amount"):
+			var cur: int = 0
+			var v: Variant = econ.get("minerals")
+			if typeof(v) == TYPE_INT: cur = int(v)
+			econ.call("set_amount", cur + amount); return
+		var bv2: Variant = econ.get("minerals")
+		if typeof(bv2) == TYPE_INT:
+			econ.set("minerals", int(bv2) + amount); return
 
 # -------- Level color --------
 func _color_for_level(lvl: int) -> Color:

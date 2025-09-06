@@ -10,18 +10,23 @@ extends CanvasLayer
 
 const TAB_OFFENSE := 0
 const TAB_BASE := 1
+const TAB_ECON := 2
 
 var _panel: Control
 var _tabs: TabContainer
 
 var _scroll_offense: ScrollContainer
 var _scroll_base: ScrollContainer
+var _scroll_econ: ScrollContainer
+
 var _grid_offense: GridContainer
 var _grid_base: GridContainer
+var _grid_econ: GridContainer
 
 # Per-tab card maps: id:String -> Button
 var _cards_offense: Dictionary = {}
 var _cards_base: Dictionary = {}
+var _cards_econ: Dictionary = {}
 
 func _ready() -> void:
 	# Root panel positioned bottom-left
@@ -35,25 +40,32 @@ func _ready() -> void:
 	_tabs.tab_alignment = TabBar.ALIGNMENT_LEFT
 	_panel.add_child(_tabs)
 
-	# Offense tab (ScrollContainer -> Grid)
+	# Offense tab
 	_grid_offense = _make_grid()
 	_scroll_offense = _make_scroller()
 	_scroll_offense.add_child(_grid_offense)
-
 	var offense_tab := MarginContainer.new()
 	offense_tab.add_child(_scroll_offense)
 	_tabs.add_child(offense_tab)
 	_tabs.set_tab_title(TAB_OFFENSE, "Offense")
 
-	# Base/Utility tab (ScrollContainer -> Grid)
+	# Base tab
 	_grid_base = _make_grid()
 	_scroll_base = _make_scroller()
 	_scroll_base.add_child(_grid_base)
-
 	var base_tab := MarginContainer.new()
 	base_tab.add_child(_scroll_base)
 	_tabs.add_child(base_tab)
 	_tabs.set_tab_title(TAB_BASE, "Base")
+
+	# Economy tab
+	_grid_econ = _make_grid()
+	_scroll_econ = _make_scroller()
+	_scroll_econ.add_child(_grid_econ)
+	var econ_tab := MarginContainer.new()
+	econ_tab.add_child(_scroll_econ)
+	_tabs.add_child(econ_tab)
+	_tabs.set_tab_title(TAB_ECON, "Economy")
 
 	# Build content
 	_build_cards()
@@ -101,7 +113,10 @@ func _on_upgrade_purchased(_id: String, _lvl: int, _next_cost: int) -> void:
 # ---------- layout ----------
 func _layout_panel() -> void:
 	# Active grid drives width/rows calc
-	var active_grid := (_grid_offense if _tabs.current_tab == TAB_OFFENSE else _grid_base)
+	var active_grid := (
+		_grid_offense if _tabs.current_tab == TAB_OFFENSE
+		else (_grid_base if _tabs.current_tab == TAB_BASE else _grid_econ)
+	)
 	var active_count: int = int(active_grid.get_child_count())
 
 	var cols: int = max(1, columns)
@@ -120,6 +135,8 @@ func _layout_panel() -> void:
 		(btn as Button).custom_minimum_size = card_min_size
 	for btn in _cards_base.values():
 		(btn as Button).custom_minimum_size = card_min_size
+	for btn in _cards_econ.values():
+		(btn as Button).custom_minimum_size = card_min_size
 
 	# Visible body height is clamped; scrolling handles overflow
 	var vp: Vector2 = Vector2(get_viewport().get_visible_rect().size)
@@ -128,6 +145,7 @@ func _layout_panel() -> void:
 
 	_scroll_offense.custom_minimum_size = Vector2(width, body_h)
 	_scroll_base.custom_minimum_size    = Vector2(width, body_h)
+	_scroll_econ.custom_minimum_size    = Vector2(width, body_h)
 
 	# TabContainer height = body + tab bar height (~28px)
 	_tabs.custom_minimum_size = Vector2(width, body_h + 28.0)
@@ -140,26 +158,27 @@ func _layout_panel() -> void:
 	_panel.position = Vector2(x, y)
 
 func _reset_scrolls() -> void:
-	if _scroll_offense:
-		_scroll_offense.scroll_vertical = 0
-	if _scroll_base:
-		_scroll_base.scroll_vertical = 0
+	if _scroll_offense: _scroll_offense.scroll_vertical = 0
+	if _scroll_base:    _scroll_base.scroll_vertical = 0
+	if _scroll_econ:    _scroll_econ.scroll_vertical = 0
 
 # ---------- build & refresh ----------
 func _build_cards() -> void:
 	_cards_offense.clear()
 	_cards_base.clear()
+	_cards_econ.clear()
 	_clear_children(_grid_offense)
 	_clear_children(_grid_base)
+	_clear_children(_grid_econ)
 
 	# Partition ids by category, but only include what exists in config
 	for k in PowerUps.upgrades_config.keys():
 		var id := String(k)
 		var cat := _category_for(id)
-		if cat == TAB_OFFENSE:
-			_add_card_for(id, _grid_offense, _cards_offense)
-		else:
-			_add_card_for(id, _grid_base, _cards_base)
+		match cat:
+			TAB_OFFENSE: _add_card_for(id, _grid_offense, _cards_offense)
+			TAB_BASE:    _add_card_for(id, _grid_base, _cards_base)
+			TAB_ECON:    _add_card_for(id, _grid_econ, _cards_econ)
 
 func _add_card_for(id: String, grid: GridContainer, bucket: Dictionary) -> void:
 	var btn := Button.new()
@@ -190,14 +209,15 @@ func _refresh_all() -> void:
 		_refresh_card(String(id))
 	for id in _cards_base.keys():
 		_refresh_card(String(id))
+	for id in _cards_econ.keys():
+		_refresh_card(String(id))
 	_layout_panel()
 
 func _refresh_card(id: String) -> void:
 	var btn: Button = (_cards_offense.get(id, null) as Button)
-	if btn == null:
-		btn = (_cards_base.get(id, null) as Button)
-	if btn == null:
-		return
+	if btn == null: btn = (_cards_base.get(id, null) as Button)
+	if btn == null: btn = (_cards_econ.get(id, null) as Button)
+	if btn == null: return
 
 	var lvl: int = PowerUps.upgrade_level(id)
 	var conf: Dictionary = PowerUps.upgrades_config.get(id, {}) as Dictionary
@@ -224,13 +244,16 @@ func _refresh_card(id: String) -> void:
 
 # ---------- category / naming ----------
 func _category_for(id: String) -> int:
+	# Economy tab
+	if id.begins_with("eco_") or id.begins_with("miner_"):
+		return TAB_ECON
 	# Offense: turret_*, crit_*, chain_lightning_*
 	if id.begins_with("turret_") or id.begins_with("crit_") or id.begins_with("chain_lightning"):
 		return TAB_OFFENSE
 	# Base: spawner_*, base_*, board_* (expansions)
 	if id.begins_with("spawner_") or id.begins_with("base_") or id.begins_with("board_"):
 		return TAB_BASE
-	# Fallback: treat unknowns as Offense (keeps them visible)
+	# Fallback: Offense
 	return TAB_OFFENSE
 
 func _pretty_name(id: String) -> String:
@@ -256,12 +279,20 @@ func _pretty_name(id: String) -> String:
 		"board_add_left":           return "Board Add Right"
 		"board_add_right":          return "Board Add Left"
 		"board_push_back":          return "Board Push Back"
+
+		# Economy
+		"eco_wave_stipend":         return "Wave Stipend"
+		"eco_perfect_bonus":        return "Perfect Bonus"
+		"eco_bounty_bonus":         return "Bounty Bonus"
+		"miner_yield":              return "Miner Yield"
+		"miner_speed":              return "Miner Speed"
 		_:
 			return id.capitalize()
 
 # ---------- values / formatting ----------
 func _value_line(id: String, current_level: int) -> String:
 	match id:
+		# ---- Offense (unchanged formats) ----
 		"turret_damage":
 			var cur_dmg: int = PowerUps.turret_damage_value()
 			var nxt_dmg: int = PowerUps.next_turret_damage_value()
@@ -293,80 +324,78 @@ func _value_line(id: String, current_level: int) -> String:
 			return "x%.2f → x%.2f" % [curm, nxtm]
 
 		"turret_multishot":
-			var cur_ms: float = 0.0
-			var nxt_ms: float = 0.0
-			if PowerUps.has_method("multishot_percent_value"):
-				cur_ms = PowerUps.multishot_percent_value()
-			if PowerUps.has_method("next_multishot_percent_value"):
-				nxt_ms = PowerUps.next_multishot_percent_value()
-
+			var cur_ms: float = (PowerUps.multishot_percent_value() if PowerUps.has_method("multishot_percent_value") else 0.0)
+			var nxt_ms: float = (PowerUps.next_multishot_percent_value() if PowerUps.has_method("next_multishot_percent_value") else 0.0)
 			var cur_base: int = 1 + int(floor(cur_ms / 100.0))
-			var cur_rem: int = int(round(cur_ms - float(cur_base - 1) * 100.0))
-			if cur_rem < 0: cur_rem = 0
-
+			var cur_rem: int = int(round(cur_ms - float(cur_base - 1) * 100.0)); if cur_rem < 0: cur_rem = 0
 			var nxt_base: int = 1 + int(floor(nxt_ms / 100.0))
-			var nxt_rem: int = int(round(nxt_ms - float(nxt_base - 1) * 100.0))
-			if nxt_rem < 0: nxt_rem = 0
-
+			var nxt_rem: int = int(round(nxt_ms - float(nxt_base - 1) * 100.0)); if nxt_rem < 0: nxt_rem = 0
 			return "%d +%d%% → %d +%d%%" % [cur_base, cur_rem, nxt_base, nxt_rem]
 
 		# ---- Chain Lightning ----
 		"chain_lightning_chance":
-			var curc: float = 0.0
-			var nxtc: float = 0.0
-			if PowerUps.has_method("chain_chance_value"):
-				curc = PowerUps.chain_chance_value() * 100.0
-			if PowerUps.has_method("next_chain_chance_value"):
-				nxtc = PowerUps.next_chain_chance_value() * 100.0
+			var curc: float = (PowerUps.chain_chance_value() if PowerUps.has_method("chain_chance_value") else 0.0) * 100.0
+			var nxtc: float = (PowerUps.next_chain_chance_value() if PowerUps.has_method("next_chain_chance_value") else 0.0) * 100.0
 			return "%.0f%% → %.0f%%" % [curc, nxtc]
 
 		"chain_lightning_damage":
-			var curd: float = 0.0
-			var nxtd: float = 0.0
-			if PowerUps.has_method("chain_damage_percent_value"):
-				curd = PowerUps.chain_damage_percent_value()
-			if PowerUps.has_method("next_chain_damage_percent_value"):
-				nxtd = PowerUps.next_chain_damage_percent_value()
+			var curd: float = (PowerUps.chain_damage_percent_value() if PowerUps.has_method("chain_damage_percent_value") else 0.0)
+			var nxtd: float = (PowerUps.next_chain_damage_percent_value() if PowerUps.has_method("next_chain_damage_percent_value") else 0.0)
 			return "%.0f%% → %.0f%%" % [curd, nxtd]
 
 		"chain_lightning_jumps":
-			var curj: int = 0
-			var nxtj: int = 0
-			if PowerUps.has_method("chain_jumps_value"):
-				curj = PowerUps.chain_jumps_value()
-			if PowerUps.has_method("next_chain_jumps_value"):
-				nxtj = PowerUps.next_chain_jumps_value()
+			var curj: int = (PowerUps.chain_jumps_value() if PowerUps.has_method("chain_jumps_value") else 0)
+			var nxtj: int = (PowerUps.next_chain_jumps_value() if PowerUps.has_method("next_chain_jumps_value") else 0)
 			return "%d → %d" % [curj, nxtj]
 
+		# ---- Base / Utility ----
 		"base_max_hp":
 			var hinfo: Dictionary = PowerUps.health_max_info()
 			var cur_m: int = int(hinfo.get("current_max_hp", 0))
 			var nxt_m: int = int(hinfo.get("next_max_hp", 0))
-			if cur_m > 0 and nxt_m > 0:
-				return "%d → %d" % [cur_m, nxt_m]
-			return "Lv " + str(current_level)
+			return "%d → %d" % [cur_m, nxt_m]
 
 		"base_regen":
 			var rinfo2: Dictionary = PowerUps.health_regen_info()
 			var cur_rg: float = float(rinfo2.get("current_regen_per_sec", 0.0))
 			var nxt_rg: float = float(rinfo2.get("next_regen_per_sec", 0.0))
-			if cur_rg >= 0.0 and nxt_rg > 0.0:
-				return "%.2f/s → %.2f/s" % [cur_rg, nxt_rg]
-			return "Lv " + str(current_level)
+			return "%.2f/s → %.2f/s" % [cur_rg, nxt_rg]
 
-		"spawner_health":
-			if PowerUps.has_method("spawner_health_value") and PowerUps.has_method("next_spawner_health_value"):
-				var cur_h: int = int(PowerUps.spawner_health_value())
-				var nxt_h: int = int(PowerUps.next_spawner_health_value())
-				return "%d → %d" % [cur_h, nxt_h]
-			return "Lv " + str(current_level)
-
-		# Board expansions: show level by default (count of purchased layers)
+		# Board expansions: keep level progression visible
 		"board_add_left", "board_add_right", "board_push_back":
-			return "Lv " + str(current_level)
+			return "%d → %d" % [current_level, current_level + 1]
+
+		# ---- Economy ----
+		"eco_wave_stipend":
+			var cur_stip: int = (PowerUps.eco_wave_stipend_value() if PowerUps.has_method("eco_wave_stipend_value") else current_level)
+			var nxt_stip: int = (PowerUps.next_eco_wave_stipend_value() if PowerUps.has_method("next_eco_wave_stipend_value") else current_level + 1)
+			return "%d → %d" % [cur_stip, nxt_stip]
+
+		"eco_perfect_bonus":
+			var cur_pb: float = (PowerUps.eco_perfect_bonus_pct_value() if PowerUps.has_method("eco_perfect_bonus_pct_value") else float(current_level) * 0.05) * 100.0
+			var nxt_pb: float = (PowerUps.next_eco_perfect_bonus_pct_value() if PowerUps.has_method("next_eco_perfect_bonus_pct_value") else float(current_level + 1) * 0.05) * 100.0
+			return "%.0f%% → %.0f%%" % [cur_pb, nxt_pb]
+
+		"eco_bounty_bonus":
+			var cur_bb: float = (PowerUps.eco_bounty_bonus_pct_value() if PowerUps.has_method("eco_bounty_bonus_pct_value") else float(current_level) * 0.05) * 100.0
+			var nxt_bb: float = (PowerUps.next_eco_bounty_bonus_pct_value() if PowerUps.has_method("next_eco_bounty_bonus_pct_value") else float(current_level + 1) * 0.05) * 100.0
+			return "%.0f%% → %.0f%%" % [cur_bb, nxt_bb]
+
+		"miner_yield":
+			# Shows bonus per tick contributed by PowerUps (not total miner tick)
+			var cur_y: int = (PowerUps.miner_yield_bonus_value() if PowerUps.has_method("miner_yield_bonus_value") else current_level)
+			var nxt_y: int = (PowerUps.next_miner_yield_bonus_value() if PowerUps.has_method("next_miner_yield_bonus_value") else current_level + 1)
+			return "+%d/tick → +%d/tick" % [cur_y, nxt_y]
+
+		"miner_speed":
+			# Show interval multiplier (×0.92 is ~8.7% faster). Smaller is better.
+			var cur_s: float = (PowerUps.miner_speed_scale_value() if PowerUps.has_method("miner_speed_scale_value") else max(0.01, 1.0 - 0.08 * float(current_level)))
+			var nxt_s: float = (PowerUps.next_miner_speed_scale_value() if PowerUps.has_method("next_miner_speed_scale_value") else max(0.01, 1.0 - 0.08 * float(current_level + 1)))
+			return "×%.2f → ×%.2f" % [cur_s, nxt_s]
 
 		_:
-			return "Lv " + str(current_level)
+			# Fallback: show level progression rather than "Lv N"
+			return "%d → %d" % [current_level, current_level + 1]
 
 # ---------- utils ----------
 func _clear_children(n: Node) -> void:
