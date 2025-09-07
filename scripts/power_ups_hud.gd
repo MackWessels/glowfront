@@ -280,10 +280,10 @@ func _pretty_name(id: String) -> String:
 		"board_add_right":          return "Board Add Left"
 		"board_push_back":          return "Board Push Back"
 
-		# Economy
+		# Economy (ids must match PowerUps.upgrades_config)
 		"eco_wave_stipend":         return "Wave Stipend"
-		"eco_perfect_bonus":        return "Perfect Bonus"
-		"eco_bounty_bonus":         return "Bounty Bonus"
+		"eco_perfect":              return "Eco Perfect"
+		"eco_bounty":               return "Eco Bounty"
 		"miner_yield":              return "Miner Yield"
 		"miner_speed":              return "Miner Speed"
 		_:
@@ -292,7 +292,7 @@ func _pretty_name(id: String) -> String:
 # ---------- values / formatting ----------
 func _value_line(id: String, current_level: int) -> String:
 	match id:
-		# ---- Offense (unchanged formats) ----
+		# ---- Offense ----
 		"turret_damage":
 			var cur_dmg: int = PowerUps.turret_damage_value()
 			var nxt_dmg: int = PowerUps.next_turret_damage_value()
@@ -365,32 +365,30 @@ func _value_line(id: String, current_level: int) -> String:
 		"board_add_left", "board_add_right", "board_push_back":
 			return "%d → %d" % [current_level, current_level + 1]
 
-		# ---- Economy ----
+		# ---- Economy (ids now match PowerUps) ----
 		"eco_wave_stipend":
 			var cur_stip: int = (PowerUps.eco_wave_stipend_value() if PowerUps.has_method("eco_wave_stipend_value") else current_level)
 			var nxt_stip: int = (PowerUps.next_eco_wave_stipend_value() if PowerUps.has_method("next_eco_wave_stipend_value") else current_level + 1)
 			return "%d → %d" % [cur_stip, nxt_stip]
 
-		"eco_perfect_bonus":
-			var cur_pb: float = (PowerUps.eco_perfect_bonus_pct_value() if PowerUps.has_method("eco_perfect_bonus_pct_value") else float(current_level) * 0.05) * 100.0
-			var nxt_pb: float = (PowerUps.next_eco_perfect_bonus_pct_value() if PowerUps.has_method("next_eco_perfect_bonus_pct_value") else float(current_level + 1) * 0.05) * 100.0
+		"eco_perfect":
+			var cur_pb: float = (PowerUps.eco_perfect_bonus_pct_value() if PowerUps.has_method("eco_perfect_bonus_pct_value") else float(current_level) * 0.25) * 100.0
+			var nxt_pb: float = (PowerUps.next_eco_perfect_bonus_pct_value() if PowerUps.has_method("next_eco_perfect_bonus_pct_value") else float(current_level + 1) * 0.25) * 100.0
 			return "%.0f%% → %.0f%%" % [cur_pb, nxt_pb]
 
-		"eco_bounty_bonus":
-			var cur_bb: float = (PowerUps.eco_bounty_bonus_pct_value() if PowerUps.has_method("eco_bounty_bonus_pct_value") else float(current_level) * 0.05) * 100.0
-			var nxt_bb: float = (PowerUps.next_eco_bounty_bonus_pct_value() if PowerUps.has_method("next_eco_bounty_bonus_pct_value") else float(current_level + 1) * 0.05) * 100.0
+		"eco_bounty":
+			var cur_bb: float = (PowerUps.eco_bounty_bonus_pct_value() if PowerUps.has_method("eco_bounty_bonus_pct_value") else float(current_level) * 0.15) * 100.0
+			var nxt_bb: float = (PowerUps.next_eco_bounty_bonus_pct_value() if PowerUps.has_method("next_eco_bounty_bonus_pct_value") else float(current_level + 1) * 0.15) * 100.0
 			return "%.0f%% → %.0f%%" % [cur_bb, nxt_bb]
 
 		"miner_yield":
-			# Shows bonus per tick contributed by PowerUps (not total miner tick)
 			var cur_y: int = (PowerUps.miner_yield_bonus_value() if PowerUps.has_method("miner_yield_bonus_value") else current_level)
 			var nxt_y: int = (PowerUps.next_miner_yield_bonus_value() if PowerUps.has_method("next_miner_yield_bonus_value") else current_level + 1)
 			return "+%d/tick → +%d/tick" % [cur_y, nxt_y]
 
 		"miner_speed":
-			# Show interval multiplier (×0.92 is ~8.7% faster). Smaller is better.
-			var cur_s: float = (PowerUps.miner_speed_scale_value() if PowerUps.has_method("miner_speed_scale_value") else max(0.01, 1.0 - 0.08 * float(current_level)))
-			var nxt_s: float = (PowerUps.next_miner_speed_scale_value() if PowerUps.has_method("next_miner_speed_scale_value") else max(0.01, 1.0 - 0.08 * float(current_level + 1)))
+			var cur_s: float = (PowerUps.miner_speed_scale_value() if PowerUps.has_method("miner_speed_scale_value") else max(0.01, 1.0))
+			var nxt_s: float = (PowerUps.next_miner_speed_scale_value() if PowerUps.has_method("next_miner_speed_scale_value") else max(0.01, 0.92))
 			return "×%.2f → ×%.2f" % [cur_s, nxt_s]
 
 		_:

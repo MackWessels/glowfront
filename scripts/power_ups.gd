@@ -60,7 +60,7 @@ func _try_spend(cost: int, reason: String = "") -> bool:
 	"board_push_back":   {"cost_sequence":[60,80,105,135,170,210], "max_level":0},
 
 	# =====================================================
-	# ECONOMY TAB (new)
+	# ECONOMY TAB
 	# =====================================================
 	# Miner: +yield per tick
 	"miner_yield":  {"cost_sequence":[15,25,40,60,85], "max_level":3},
@@ -76,7 +76,7 @@ func _try_spend(cost: int, reason: String = "") -> bool:
 }
 
 # =========================================================
-# Gameplay tuning (unchanged values you already had)
+# Gameplay tuning
 # =========================================================
 @export var rate_mult_per_step: float = 0.95
 @export var turret_base_fire_rate_default: float = 1.0
@@ -123,7 +123,6 @@ var _upgrades_state: Dictionary = {}   # id -> {"level":int}
 var _bounty_carry: float = 0.0
 
 func _ready() -> void:
-	# Hook shards to refresh totals
 	var shards: Node = get_node_or_null("/root/Shards")
 	if shards:
 		if shards.has_signal("changed"):
@@ -151,7 +150,7 @@ func meta_level(id: String) -> int:
 func total_level(id: String) -> int:
 	return upgrade_level(id) + meta_level(id)
 
-# Friendly alias used by Miner etc.
+# Friendly alias
 func level(id: String) -> int:
 	return total_level(id)
 
@@ -185,7 +184,7 @@ func _sequence_cost(seq: Array, lvl_index: int) -> int:
 	var cost: int = int(seq[n - 1])
 	var inc: int = (int(seq[n - 1]) - int(seq[n - 2])) if n >= 2 else 5
 	var extra: int = lvl_index - n + 1
-	for _i in extra:
+	for _i in range(extra):
 		inc += 1
 		cost += inc
 	return cost
@@ -218,7 +217,7 @@ func purchase(id: String) -> bool:
 	return true
 
 # =========================================================
-# SHARDS helpers (unchanged)
+# SHARDS helpers
 # =========================================================
 func get_next_meta_offer(id: String) -> Dictionary:
 	var shards: Node = get_node_or_null("/root/Shards")
@@ -245,13 +244,15 @@ func purchase_meta(id: String) -> bool:
 func _apply_shards_meta() -> void:
 	changed.emit()
 
-# ===== Economy value getters (used by the HUD) =====
+# =========================================================
+# ECONOMY VALUE GETTERS (for HUD display)
+# =========================================================
 
-# --- Wave Stipend ($ per wave) ---
+# --- Wave Stipend table ---
 func _stipend_for_level(l: int) -> int:
 	match l:
 		0: return 0
-		1: return 3     # tune as you like
+		1: return 3
 		2: return 5
 		_: return 8
 
@@ -261,32 +262,57 @@ func eco_wave_stipend_value() -> int:
 func next_eco_wave_stipend_value() -> int:
 	return _stipend_for_level(total_level("eco_wave_stipend") + 1)
 
-
+# --- Perfect bonus (% of wave payout) ---
 func _perfect_pct_for_level(l: int) -> float:
-	match l:
-		0: return 0.0
-		1: return 0.50   # 50% at Lv1
-		2: return 0.75   # 75% at Lv2
-		_: return 1.00   # 100% at Lv3+
+	return 0.25 * float(max(0, l))   # 25% per level
 
 func eco_perfect_bonus_pct_value() -> float:
-	return _perfect_pct_for_level(total_level("eco_perfect_bonus"))
+	return _perfect_pct_for_level(total_level("eco_perfect"))
 
 func next_eco_perfect_bonus_pct_value() -> float:
-	return _perfect_pct_for_level(total_level("eco_perfect_bonus") + 1)
+	return _perfect_pct_for_level(total_level("eco_perfect") + 1)
 
+# --- Bounty bonus (% of kill bounty) ---
 func _bounty_pct_for_level(l: int) -> float:
-	return 0.05 * float(max(0, l))
+	return 0.15 * float(max(0, l))   # 15% per level
 
 func eco_bounty_bonus_pct_value() -> float:
-	return _bounty_pct_for_level(total_level("eco_bounty_bonus"))
+	return _bounty_pct_for_level(total_level("eco_bounty"))
 
 func next_eco_bounty_bonus_pct_value() -> float:
-	return _bounty_pct_for_level(total_level("eco_bounty_bonus") + 1)
+	return _bounty_pct_for_level(total_level("eco_bounty") + 1)
 
-# --- Miner upgrades (already working in your HUD, shown for completeness) ---
+# Compact info helpers (mirrors Offense/Base helpers)
+func eco_bounty_info() -> Dictionary:
+	var lvl := total_level("eco_bounty")
+	return {
+		"cost_minerals": upgrade_cost("eco_bounty"),
+		"current_pct": _bounty_pct_for_level(lvl),
+		"next_pct": _bounty_pct_for_level(lvl + 1),
+		"available": upgrade_cost("eco_bounty") >= 0
+	}
+
+func eco_wave_stipend_info() -> Dictionary:
+	var lvl := total_level("eco_wave_stipend")
+	return {
+		"cost_minerals": upgrade_cost("eco_wave_stipend"),
+		"current_amount": _stipend_for_level(lvl),
+		"next_amount": _stipend_for_level(lvl + 1),
+		"available": upgrade_cost("eco_wave_stipend") >= 0
+	}
+
+func eco_perfect_info() -> Dictionary:
+	var lvl := total_level("eco_perfect")
+	return {
+		"cost_minerals": upgrade_cost("eco_perfect"),
+		"current_pct": _perfect_pct_for_level(lvl),
+		"next_pct": _perfect_pct_for_level(lvl + 1),
+		"available": upgrade_cost("eco_perfect") >= 0
+	}
+
+# --- Miner upgrades (unchanged) ---
 func miner_yield_bonus_value() -> int:
-	return total_level("miner_yield")  # +1/tick per level (tune if needed)
+	return total_level("miner_yield")  # +1/tick per level
 
 func next_miner_yield_bonus_value() -> int:
 	return total_level("miner_yield") + 1
@@ -306,9 +332,8 @@ func next_miner_speed_scale_value() -> float:
 		2: return 0.88
 		_: return 0.82
 
-
 # =========================================================
-# HUD helpers (unchanged public surface)
+# HUD helpers
 # =========================================================
 func get_next_run_offer(id: String) -> Dictionary:
 	var next_value: int = _value_for(id, total_level(id) + 2)
@@ -431,7 +456,9 @@ func multishot_percent_value() -> float:
 func next_multishot_percent_value() -> float:
 	return maxf(0.0, multishot_base_percent + multishot_percent_per_step * float(total_level("turret_multishot") + 1))
 
-# ---------- VALUE PATHS & damage ----------
+# =========================================================
+# VALUE PATHS & damage
+# =========================================================
 func _value_for(id: String, step: int) -> int:
 	if step <= 0:
 		return 0
@@ -501,11 +528,11 @@ func damage_multiplier(kind: String = "") -> float: return 1.0
 func modified_cost(action: String, base: int) -> int: return base
 
 # =========================================================
-# ECONOMY RUNTIME HELPERS (NEW)
+# ECONOMY RUNTIME HELPERS
 # =========================================================
 
 # --- Bounty ---
-# Each level adds +15% bounty. Tweak if desired.
+# Each level adds +15% bounty.
 func bounty_multiplier() -> float:
 	var lvl: int = total_level("eco_bounty")
 	return 1.0 + 0.15 * float(lvl)
@@ -550,10 +577,10 @@ func award_bounty(base_amount: int, source: String = "kill") -> Dictionary:
 	}
 
 # --- Wave stipend ---
-# Simple model: stipend = 2 * level minerals at the start of EVERY wave.
+# Uses the same step table as the HUD.
 func stipend_value_per_wave() -> int:
 	var lvl: int = total_level("eco_wave_stipend")
-	return max(0, 2 * lvl)
+	return _stipend_for_level(lvl)
 
 func award_wave_stipend(wave_index: int) -> int:
 	var amt: int = stipend_value_per_wave()
