@@ -3,7 +3,22 @@ class_name EnemySpawner
 
 # ---------------- Setup ----------------
 @export var tile_board_path: NodePath
-@export var enemy_scene: PackedScene
+@export var enemy_scene: PackedScene                   # basic UFO
+
+# ----- Carrier config (all passed at spawn time) -----
+@export var carrier_scene: PackedScene                 # e.g. res://scenes/enemy_carrier.tscn
+@export var spawn_carriers: bool = true
+@export_range(0.0, 1.0, 0.001) var carrier_chance: float = 0.1
+
+# Defaults pushed into the carrier instance at spawn:
+@export var carrier_hover_offset: float = 0.6
+@export var carrier_drop_every_tiles: float = 1.5
+@export var carrier_minions_per_drop: int = 1
+@export var carrier_max_drops: int = 6
+@export var carrier_max_per_tile: int = 3
+@export var carrier_drop_spread: float = 0.35
+@export var carrier_search_radius_tiles: int = 2
+@export var carrier_landing_time: float = 0.20
 
 # pacing
 @export var auto_start: bool = true
@@ -66,8 +81,8 @@ var _alive: int = 0
 var _wave_remaining: int = 0
 
 # Per-wave bookkeeping (for stipend & perfect bonus)
-var _wave_total_spawned: int = 0      # how many we actually spawned this wave
-var _wave_resolved: int = 0           # killed or leaked
+var _wave_total_spawned: int = 0      # count only *spawner-made* enemies
+var _wave_resolved: int = 0
 var _wave_leaks: int = 0
 var _wave_kill_payout: int = 0        # integer minerals granted from kills (post-bounty, pre-perfect)
 var _wave_awarded: bool = false       # ensure perfect bonus pays once
@@ -116,7 +131,7 @@ func start_spawning() -> void:
 		_timer.start()
 	if _phase != "spawning":
 		_phase = "spawning"
-		_begin_wave()  # <- stipend + reset counters
+		_begin_wave()  # stipend + reset counters
 		_wave_remaining = _calc_wave_total()
 		_frontload_wave()
 		_phase_timer.start(maxf(0.1, wave_time_sec))
@@ -158,7 +173,7 @@ func _on_phase_timer() -> void:
 # Spawning
 # =====================================================================
 func _on_spawn_tick() -> void:
-	if _paused or _board == null or enemy_scene == null:
+	if _paused or _board == null:
 		return
 	if _alive >= max_alive:
 		return
@@ -209,18 +224,31 @@ func _spawn_one() -> void:
 	p += lat.normalized() * randf_range(-0.15 * tile_w, 0.15 * tile_w)
 	p += fwd * randf_range(-0.10 * tile_w, 0.10 * tile_w)
 
-	var inst: Node = enemy_scene.instantiate()
+	# choose scene: carrier vs basic
+	var use_carrier: bool = false
+	var scene_to_spawn: PackedScene = enemy_scene
+	if spawn_carriers and carrier_scene != null and randf() < carrier_chance:
+		use_carrier = true
+		scene_to_spawn = carrier_scene
+
+	var inst: Node = scene_to_spawn.instantiate()
 	if inst == null:
 		return
 
-	# wire refs before _ready
+	# ---- wire shared refs BEFORE add_child (runs before _ready) ----
 	if _board != null:
 		inst.set("tile_board_path", _board.get_path())
 		var g: Variant = _board.get("goal_node")
 		if typeof(g) == TYPE_OBJECT and g != null and g is Node3D:
 			inst.set("goal_node_path", g.get_path())
 
+	# carrier-specific config (all passed here)
+	if use_carrier:
+		_prime_carrier(inst, p, tile_w)
+
 	add_child(inst)
+
+	# signals
 	if inst.has_signal("died"):
 		inst.died.connect(_on_enemy_died)
 
@@ -255,6 +283,113 @@ func _spawn_one() -> void:
 	_wave_total_spawned += 1
 
 # =====================================================================
+# Carrier helpers
+# =====================================================================
+
+# Utility: does this object expose a property named `name`?
+func _has_prop(o: Object, name: String) -> bool:
+	for p in o.get_property_list():
+		if typeof(p) == TYPE_DICTIONARY and p.has("name") and p["name"] == name:
+			return true
+	return false
+
+# Configure a carrier instance entirely via properties/methods
+func _prime_carrier(inst: Node, spawn_pos: Vector3, tile_w: float) -> void:
+	# give it the basic minion scene to drop
+	if enemy_scene != null and _has_prop(inst, "minion_scene"):
+		inst.set("minion_scene", enemy_scene)
+
+	# pass spawner + board refs in the way the carrier expects
+	if inst.has_method("set_spawner"):
+		inst.call("set_spawner", self)
+	elif _has_prop(inst, "spawner_path"):
+		inst.set("spawner_path", get_path())
+
+	# world/tile params
+	if _has_prop(inst, "tile_size"):
+		inst.set("tile_size", tile_w)
+	if _has_prop(inst, "ground_y"):
+		inst.set("ground_y", spawn_pos.y)
+
+	# tune carrier behavior (these are the exports you set on the spawner)
+	if _has_prop(inst, "hover_offset"):
+		inst.set("hover_offset", carrier_hover_offset)
+	if _has_prop(inst, "drop_every_tiles"):
+		inst.set("drop_every_tiles", carrier_drop_every_tiles)
+	if _has_prop(inst, "minions_per_drop"):
+		inst.set("minions_per_drop", carrier_minions_per_drop)
+	if _has_prop(inst, "max_drops"):
+		inst.set("max_drops", carrier_max_drops)
+	if _has_prop(inst, "max_per_tile"):
+		inst.set("max_per_tile", carrier_max_per_tile)
+	if _has_prop(inst, "drop_spread"):
+		inst.set("drop_spread", carrier_drop_spread)
+	if _has_prop(inst, "search_radius_tiles"):
+		inst.set("search_radius_tiles", carrier_search_radius_tiles)
+	if _has_prop(inst, "landing_time"):
+		inst.set("landing_time", carrier_landing_time)
+
+# =====================================================================
+# Carrier/child spawn hook  ← used by CarrierEnemy
+# =====================================================================
+# Called by special enemies (e.g., carriers) to spawn mid-wave children.
+# - counts_toward_cap: if true, respects max_alive and increments _alive.
+# - tags: stored on the child (e.g., ["carrier"]) for bookkeeping like leaks.
+func request_child_spawn(
+		scene: PackedScene,
+		xform: Transform3D,
+		counts_toward_cap := true,
+		tags := []
+	) -> Node:
+	if scene == null or _board == null:
+		return null
+	if counts_toward_cap and _alive >= max_alive:
+		return null
+
+	var inst: Node = scene.instantiate()
+	if inst == null:
+		return null
+
+	# Wire refs before _ready
+	inst.set("tile_board_path", _board.get_path())
+	var g: Variant = _board.get("goal_node")
+	if typeof(g) == TYPE_OBJECT and g != null and g is Node3D:
+		inst.set("goal_node_path", g.get_path())
+
+	add_child(inst)
+	if inst.has_signal("died"):
+		inst.died.connect(_on_enemy_died)
+
+	# Level + stats
+	var lvl: int = _pick_level_for_wave(wave_index)
+	if inst.has_method("set_level"):
+		inst.call("set_level", lvl)
+	else:
+		inst.set("level", lvl)
+
+	var stats: Dictionary = _compute_stats_for_level_and_wave(lvl, wave_index)
+	if inst.has_method("apply_stats"):
+		inst.call("apply_stats", stats)
+	else:
+		for k in stats.keys():
+			inst.set(k, stats[k])
+
+	var inst3 := inst as Node3D
+	if inst3 != null:
+		inst3.global_transform = xform   # IMPORTANT: global, not local
+		# Do NOT lock_y_to() here; the carrier will tween then lock.
+
+	if counts_toward_cap:
+		_alive += 1
+
+	if tags is Array and not tags.is_empty():
+		inst.set_meta("spawn_tags", tags)
+
+	return inst
+
+
+
+# =====================================================================
 # Callbacks
 # =====================================================================
 func _on_enemy_died() -> void:
@@ -262,12 +397,23 @@ func _on_enemy_died() -> void:
 	_wave_resolved += 1
 	_maybe_award_wave_end()
 
-# Called by Enemy when it reaches the goal (see tiny Enemy tweak below)
+# Called by Enemy when it reaches the goal (carrier children can be ignored)
 func notify_leak(enemy: Node = null) -> void:
-	_wave_leaks += 1
+	var count_this_leak: bool = true
+	if enemy != null:
+		var tags: Variant = enemy.get_meta("spawn_tags")
+		if typeof(tags) == TYPE_ARRAY and "carrier" in tags:
+			count_this_leak = false
+
+	if count_this_leak:
+		_wave_leaks += 1
+
 	_wave_resolved += 1
 	if debug_waves:
-		print("[Wave] leak registered; leaks=", _wave_leaks)
+		if count_this_leak:
+			print("[Wave] leak registered; leaks=", _wave_leaks)
+		else:
+			print("[Wave] leak ignored (carrier-child).")
 	_maybe_award_wave_end()
 
 # Called by Enemy after it awarded bounty to Economy.

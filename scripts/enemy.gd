@@ -40,6 +40,7 @@ signal damaged(by, amount: int, killed: bool)
 
 var _board: Node = null
 var _goal: Node3D = null
+var _spawner_ref: Node = null          # ← optional spawner reference
 var _tile_w: float = 1.0
 var _y_plane: float = 0.0
 
@@ -130,6 +131,35 @@ func apply_stats(s: Dictionary) -> void:
 	if s.has("mass"):   mass   = float(s["mass"])
 	if s.has("speed"):  speed  = float(s["speed"])
 
+# --------- New: integration helpers ----------
+func set_tile_board(tb: Node) -> void:
+	_board = tb
+	if tb != null and tb is Node:
+		tile_board_path = (tb as Node).get_path()
+	_tile_w = _get_tile_w()
+
+func set_spawner(sp: Node) -> void:
+	_spawner_ref = sp
+
+func lock_y_to(y: float) -> void:
+	_y_plane = y
+	global_position.y = y
+
+# Optional: soft landing when being dropped
+func land_from_drop(target_y: float, t: float = 0.2) -> void:
+	var old_layer: int = collision_layer
+	var old_mask: int = collision_mask
+	collision_layer = 0
+	collision_mask = 0
+	var tw := create_tween()
+	tw.tween_property(self, "global_position:y", target_y, t)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_callback(func ():
+		collision_layer = old_layer
+		collision_mask = old_mask
+		lock_y_to(target_y)
+	)
+
 # ============================ Combat ============================
 func take_damage(ctx: Dictionary) -> void:
 	var by: Node = ctx.get("by", null) as Node
@@ -164,18 +194,19 @@ func _die(killed: bool) -> void:
 	_dead = true
 
 	if killed:
-		# ---- Minerals (via PowerUps, which handles bounty bonus & carry) ----
+		# ---- Minerals ----
 		var payout: int = 0
 		if typeof(PowerUps) != TYPE_NIL and PowerUps.has_method("award_bounty"):
 			var info: Dictionary = PowerUps.award_bounty(max(0, mineral_reward), "kill")
 			payout = int(info.get("payout", 0))
 		else:
-			# Fallback if PowerUps not present
 			payout = max(0, mineral_reward)
 			_award_minerals(payout)
 
-		# Notify spawner so it can tally this wave's payouts (for perfect bonus)
+		# Notify spawner (parent if possible, else stored ref)
 		var spawner := get_parent()
+		if (spawner == null or not spawner.has_method("notify_kill_payout")) and _spawner_ref != null:
+			spawner = _spawner_ref
 		if spawner and spawner.has_method("notify_kill_payout"):
 			spawner.notify_kill_payout(payout)
 
@@ -195,6 +226,8 @@ func _die(killed: bool) -> void:
 func _on_reach_goal() -> void:
 	# Tell the spawner we leaked before removing ourselves.
 	var spawner := get_parent()
+	if (spawner == null or not spawner.has_method("notify_leak")) and _spawner_ref != null:
+		spawner = _spawner_ref
 	if spawner and spawner.has_method("notify_leak"):
 		spawner.notify_leak(self)
 	_die(false)  # no rewards on leak

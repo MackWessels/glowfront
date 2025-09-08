@@ -1,6 +1,6 @@
 [gd_scene load_steps=10 format=4 uid="uid://bksm503hl2ahi"]
 
-[ext_resource type="Script" uid="uid://cm3n6i18uv218" path="res://scripts/enemy.gd" id="1_7p1mj"]
+[ext_resource type="Script" uid="uid://bq051t2ab4hei" path="res://scripts/enemy.gd" id="1_7p1mj"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_md0e3"]
 radius = 1.0
@@ -77,17 +77,17 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_o2jv1")
 
 [node name="Enemy" type="CharacterBody3D" groups=["enemies", "enemy"]]
-transform = Transform3D(0.3, 0, 0, 0, 0.3, 0, 0, 0, 0.3, 0, 0, 0)
 collision_layer = 4
 collision_mask = 38
 input_ray_pickable = false
 script = ExtResource("1_7p1mj")
 
 [node name="DomeCollider" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.0612426, 0)
+transform = Transform3D(0.3, 0, 0, 0, 0.3, 0, 0, 0, 0.3, 0, -0.0612426, 0)
 shape = SubResource("SphereShape3D_md0e3")
 
 [node name="UFO" type="Node3D" parent="."]
+transform = Transform3D(0.3, 0, 0, 0, 0.3, 0, 0, 0, 0.3, 0, 0, 0)
 
 [node name="Base" type="MeshInstance3D" parent="UFO"]
 transform = Transform3D(1, 0, 0, 0, 0.3, 0, 0, 0, 1, 0, 0, 0)
