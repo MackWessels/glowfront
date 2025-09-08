@@ -3,10 +3,9 @@ class_name CarrierEnemy
 
 # ---------- Carrier config ----------
 @export var minion_scene: PackedScene
-@export var landing_nudge_tiles: float = 0.01   # tiny upward lift to avoid sinking
 
-@export var hover_offset: float = 0.6
-@export var drop_every_tiles: float = 1.5
+@export var hover_offset: float = 0.6            # carrier floats above ground by this much
+@export var drop_every_tiles: float = 1.5         # spacing between drops (in tiles)
 @export var minions_per_drop: int = 1
 @export var max_drops: int = 6
 
@@ -17,10 +16,11 @@ class_name CarrierEnemy
 # Within-tile spawn jitter (in tile space)
 @export var drop_spread: float = 0.35
 
-# Visual landing time
+# Visual landing time and tiny lift to avoid z-fighting/sinking
 @export var landing_time: float = 0.20
+@export var landing_nudge_y: float = 0.01         # world units
 
-# Optional node that marks the hole location
+# Optional node that marks the drop hole on the carrier
 @export var hole_path: NodePath = NodePath("Hole")
 
 @export var debug_drops: bool = false
@@ -37,7 +37,9 @@ var _spacing_world: float = 1.0
 var _drops_done: int = 0
 var _cell_counts: Dictionary = {}    # Vector2i -> int
 
-# -------------------------------------------------------------------
+# =====================================================================
+# Lifecycle
+# =====================================================================
 func _ready() -> void:
 	_rng.randomize()
 
@@ -53,13 +55,14 @@ func _ready() -> void:
 	# distance between drops in world units
 	_spacing_world = maxf(0.25 * _tile_w, drop_every_tiles * _tile_w)
 
-# allow spawner to pass itself
 func set_spawner(sp: Node) -> void:
 	_spawner = sp
 	if super.has_method("set_spawner"):
 		super.set_spawner(sp)
 
-# -------------------------------------------------------------------
+# =====================================================================
+# Movement hook: after base moves, accumulate distance and drop
+# =====================================================================
 func _physics_process(delta: float) -> void:
 	var prev: Vector3 = global_position
 	super._physics_process(delta)
@@ -71,34 +74,29 @@ func _physics_process(delta: float) -> void:
 			_accum_dist_world = 0.0
 			_try_drop()
 
-# -------------------------------------------------------------------
+# =====================================================================
 # Drop logic
+# =====================================================================
 func _try_drop() -> void:
 	if minion_scene == null or _drops_done >= max_drops:
 		return
 
 	# World position we're above (hole if present)
-	var drop_from: Vector3 = (_hole.global_position if _hole != null else global_position)
+	var drop_from: Vector3 = _hole.global_position if _hole != null else global_position
 
 	# Prefer the cell directly under the hole
 	var target_cell: Vector2i = _world_to_cell_safe(drop_from)
 
-	var candidate_cell_v: Variant = _find_valid_drop_cell(target_cell)
-	if candidate_cell_v == null:
+	var candidate_v: Variant = _find_valid_drop_cell(target_cell)
+	if candidate_v == null:
 		if debug_drops:
 			print("[Carrier] skip drop; no free cell near ", target_cell)
 		return
-	var candidate_cell: Vector2i = candidate_cell_v
+	var candidate_cell: Vector2i = candidate_v
 
+	# Use the board’s cell-center Y as the ground — no hover math, no raycast.
 	var center: Vector3 = _cell_to_world_center(candidate_cell)
-
-	# Compute ground; then nudge slightly up so visuals never sink
-	var ground_y: float
-	if _tile_board and _tile_board.has_method("surface_y_at"):
-		ground_y = float(_tile_board.call("surface_y_at", center))
-	else:
-		ground_y = global_position.y - hover_offset
-	ground_y += landing_nudge_tiles * _tile_w
+	var ground_y: float = center.y + landing_nudge_y
 
 	var spawned: int = 0
 	for i in range(minions_per_drop):
@@ -111,10 +109,10 @@ func _try_drop() -> void:
 		_drops_done += 1
 		_increment_cell(candidate_cell, spawned)
 		if debug_drops:
-			print("[Carrier] dropped ", spawned, " at cell=", candidate_cell, "  total=", _drops_done, "/", max_drops)
+			print("[Carrier] dropped ", spawned, " at cell=", candidate_cell,
+				  " ground_y=", ground_y, " total=", _drops_done, "/", max_drops)
 
-
-# Spawn one minion starting at hole height, then land to the tile
+# Spawn one minion starting at hole height, then land it to the tile
 func _spawn_one_minion(center: Vector3, ground_y: float) -> bool:
 	# jitter within tile
 	var r: float = drop_spread * _tile_w * 0.5
@@ -122,7 +120,7 @@ func _spawn_one_minion(center: Vector3, ground_y: float) -> bool:
 	var jz: float = _rng.randf_range(-r, r)
 
 	# start at the hole height (or hover height above ground as fallback)
-	var start_y: float = (_hole.global_position.y if _hole != null else (ground_y + hover_offset))
+	var start_y: float = _hole.global_position.y if _hole != null else (ground_y + hover_offset)
 	var start_pos: Vector3 = Vector3(center.x + jx, start_y, center.z + jz)
 	var start_xf: Transform3D = Transform3D(Basis.IDENTITY, start_pos)
 
@@ -132,17 +130,21 @@ func _spawn_one_minion(center: Vector3, ground_y: float) -> bool:
 		if child == null:
 			return false
 
-		# Soft land to ground, then lock Y
+		# Smooth land to ground, then re-lock Y (implemented in Enemy.gd)
 		if child.has_method("land_from_drop"):
 			child.land_from_drop(ground_y, landing_time)
-		elif child is Node3D:
-			var c3: Node3D = child as Node3D
-			var tw := create_tween()
-			tw.tween_property(c3, "global_position:y", ground_y, landing_time)\
-			  .set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-			tw.tween_callback(func ():
-				if is_instance_valid(child) and child.has_method("lock_y_to"):
-					child.lock_y_to(ground_y))
+		else:
+			# Fallback: manually tween Y then lock
+			if child is Node3D:
+				if child.has_method("unlock_y"):
+					child.unlock_y()
+				var c3: Node3D = child as Node3D
+				var tw := create_tween()
+				tw.tween_property(c3, "global_position:y", ground_y, landing_time)\
+					.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+				tw.tween_callback(func ():
+					if is_instance_valid(child) and child.has_method("lock_y_to"):
+						child.lock_y_to(ground_y))
 		return true
 
 	# ---- Fallback (no spawner): local instantiate & land ----
@@ -160,29 +162,41 @@ func _spawn_one_minion(center: Vector3, ground_y: float) -> bool:
 	e3.global_position = start_pos
 	add_child(e)
 
-	# brief collision disable while dropping
+	# Save collision state OUTSIDE the if-block so the tween callback can see it
+	var had_collision: bool = false
+	var saved_layer: int = 0
+	var saved_mask: int = 0
 	if e is CollisionObject3D:
+		had_collision = true
 		var co: CollisionObject3D = e as CollisionObject3D
-		var old_layer: int = co.collision_layer
-		var old_mask: int = co.collision_mask
+		saved_layer = co.collision_layer
+		saved_mask = co.collision_mask
 		co.collision_layer = 0
 		co.collision_mask = 0
-		var tw2 := create_tween()
-		tw2.tween_property(e3, "global_position:y", ground_y, landing_time)\
-		   .set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		tw2.tween_callback(func ():
-			if is_instance_valid(e):
-				co.collision_layer = old_layer
-				co.collision_mask = old_mask
-				if e.has_method("lock_y_to"):
-					e.lock_y_to(ground_y))
+
+	if e.has_method("unlock_y"):
+		e.unlock_y()
+
+	var tw2 := create_tween()
+	tw2.tween_property(e3, "global_position:y", ground_y, landing_time)\
+		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw2.tween_callback(func ():
+		if is_instance_valid(e):
+			if had_collision:
+				var co2: CollisionObject3D = e as CollisionObject3D
+				co2.collision_layer = saved_layer
+				co2.collision_mask = saved_mask
+			if e.has_method("lock_y_to"):
+				e.lock_y_to(ground_y))
 	return true
 
-# -------------------------------------------------------------------
+# =====================================================================
 # Board helpers
+# =====================================================================
 func _world_to_cell_safe(p: Vector3) -> Vector2i:
 	if _tile_board and _tile_board.has_method("world_to_cell"):
 		return _tile_board.call("world_to_cell", p)
+	# fall back to base helper
 	return _board_cell_of_pos(p)
 
 func _cell_to_world_center(c: Vector2i) -> Vector3:
@@ -190,12 +204,8 @@ func _cell_to_world_center(c: Vector2i) -> Vector3:
 		return _tile_board.call("cell_center", c)
 	elif _tile_board and _tile_board.has_method("cell_to_world"):
 		return _tile_board.call("cell_to_world", c)
+	# last resort: assume flat grid at our hover plane
 	return Vector3(c.x * _tile_w, _y_plane - hover_offset, c.y * _tile_w)
-
-func _surface_y_at(p: Vector3) -> float:
-	if _tile_board and _tile_board.has_method("surface_y_at"):
-		return float(_tile_board.call("surface_y_at", p))
-	return _y_plane - hover_offset
 
 func _count_at(c: Vector2i) -> int:
 	return int(_cell_counts.get(c, 0))

@@ -454,7 +454,7 @@ shadow_mesh = SubResource("ArrayMesh_7pwao")
 [sub_resource type="BoxShape3D" id="BoxShape3D_jnyva"]
 size = Vector3(0.564697, 0.506104, 1)
 
-[node name="enemy_carrier" type="CharacterBody3D"]
+[node name="enemy_carrier" type="CharacterBody3D" groups=["enemy"]]
 script = ExtResource("1_jr3vp")
 minion_scene = ExtResource("2_jnyva")
 hole_path = NodePath("speeder/hole")

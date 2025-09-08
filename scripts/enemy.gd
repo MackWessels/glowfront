@@ -6,6 +6,9 @@ class_name Enemy
 @export var accel: float = 22.0
 @export var turn_speed_deg: float = 540.0
 
+# Y-lock
+var _y_lock_enabled: bool = true
+
 # Lane cosmetics
 @export var lane_spread_tiles: float = 0.35
 @export_range(0.0, 1.0, 0.01) var lane_bias_strength: float = 0.6
@@ -40,7 +43,7 @@ signal damaged(by, amount: int, killed: bool)
 
 var _board: Node = null
 var _goal: Node3D = null
-var _spawner_ref: Node = null          # ← optional spawner reference
+var _spawner_ref: Node = null
 var _tile_w: float = 1.0
 var _y_plane: float = 0.0
 
@@ -93,6 +96,7 @@ func _ready() -> void:
 
 	_tile_w = _get_tile_w()
 	_y_plane = global_position.y
+	_y_lock_enabled = true
 	_lane_initialized = false
 
 	# react to global path rebakes
@@ -118,6 +122,8 @@ func reset_for_spawn() -> void:
 	_plan_from_cell(_cur_cell)
 	_entry_active = false
 	_dead = false
+	_y_plane = global_position.y
+	_y_lock_enabled = true
 	_apply_level_skin()
 
 func set_entry_target(p: Vector3, radius: float) -> void:
@@ -131,7 +137,7 @@ func apply_stats(s: Dictionary) -> void:
 	if s.has("mass"):   mass   = float(s["mass"])
 	if s.has("speed"):  speed  = float(s["speed"])
 
-# --------- New: integration helpers ----------
+# --------- Integration helpers ----------
 func set_tile_board(tb: Node) -> void:
 	_board = tb
 	if tb != null and tb is Node:
@@ -143,22 +149,36 @@ func set_spawner(sp: Node) -> void:
 
 func lock_y_to(y: float) -> void:
 	_y_plane = y
+	_y_lock_enabled = true
 	global_position.y = y
 
-# Optional: soft landing when being dropped
+func unlock_y() -> void:
+	_y_lock_enabled = false
+
+# Smooth landing when being dropped by a carrier
 func land_from_drop(target_y: float, t: float = 0.2) -> void:
-	var old_layer: int = collision_layer
-	var old_mask: int = collision_mask
-	collision_layer = 0
-	collision_mask = 0
+	# Allow tween to control Y without being clamped
+	unlock_y()
+
+	# briefly disable collisions during the drop to avoid snagging edge cases
+	var had_collision_obj := self is CollisionObject3D
+	var old_layer := 0
+	var old_mask := 0
+	if had_collision_obj:
+		old_layer = (self as CollisionObject3D).collision_layer
+		old_mask = (self as CollisionObject3D).collision_mask
+		(self as CollisionObject3D).collision_layer = 0
+		(self as CollisionObject3D).collision_mask = 0
+
 	var tw := create_tween()
 	tw.tween_property(self, "global_position:y", target_y, t)\
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_callback(func ():
-		collision_layer = old_layer
-		collision_mask = old_mask
-		lock_y_to(target_y)
-	)
+		if had_collision_obj and is_instance_valid(self):
+			(self as CollisionObject3D).collision_layer = old_layer
+			(self as CollisionObject3D).collision_mask = old_mask
+		# Lock exactly at the landing height
+		lock_y_to(target_y))
 
 # ============================ Combat ============================
 func take_damage(ctx: Dictionary) -> void:
@@ -234,7 +254,8 @@ func _on_reach_goal() -> void:
 
 # ============================ Helpers ============================
 func _apply_y_lock(p: Vector3) -> Vector3:
-	p.y = _y_plane
+	if _y_lock_enabled:
+		p.y = _y_plane
 	return p
 
 func _board_cell_of_pos(p: Vector3) -> Vector2i:
