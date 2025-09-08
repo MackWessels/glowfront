@@ -29,6 +29,14 @@ var _y_lock_enabled: bool = true
 @export var mineral_reward: int = 1
 @export var is_elite: bool = false
 
+# Where turrets should aim if no marker is provided
+@export var aim_height: float = 0.35
+
+# Where turrets should aim (optional; can be left empty and we’ll auto-find a child named "Target")
+@export var aim_marker_path: NodePath
+# Fallback height if no marker is found (as a fraction of tile width)
+@export var aim_height_frac: float = 0.35
+
 # Visual level (1=green, 2=blue, 3=red, 4=black)
 var _level: int = 1
 @export var level: int = 1:
@@ -156,29 +164,15 @@ func unlock_y() -> void:
 	_y_lock_enabled = false
 
 # Smooth landing when being dropped by a carrier
-func land_from_drop(target_y: float, t: float = 0.2) -> void:
-	# Allow tween to control Y without being clamped
-	unlock_y()
-
-	# briefly disable collisions during the drop to avoid snagging edge cases
-	var had_collision_obj := self is CollisionObject3D
-	var old_layer := 0
-	var old_mask := 0
-	if had_collision_obj:
-		old_layer = (self as CollisionObject3D).collision_layer
-		old_mask = (self as CollisionObject3D).collision_mask
-		(self as CollisionObject3D).collision_layer = 0
-		(self as CollisionObject3D).collision_mask = 0
-
+# Smooth landing helper for carrier drops (keeps collisions ON)
+func land_from_drop(target_y: float, t: float = 0.20) -> void:
+	unlock_y()  # allow tween to move Y
 	var tw := create_tween()
 	tw.tween_property(self, "global_position:y", target_y, t)\
 		.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_callback(func ():
-		if had_collision_obj and is_instance_valid(self):
-			(self as CollisionObject3D).collision_layer = old_layer
-			(self as CollisionObject3D).collision_mask = old_mask
-		# Lock exactly at the landing height
 		lock_y_to(target_y))
+
 
 # ============================ Combat ============================
 func take_damage(ctx: Dictionary) -> void:
@@ -500,3 +494,21 @@ func _apply_level_skin() -> void:
 	mat.metallic = 0.15
 	mat.roughness = 0.35
 	_ufo_base.material_override = mat
+
+# Return the world position turrets should aim at.
+func get_aim_point() -> Vector3:
+	var m: Node3D = null
+	# 1) explicit path set in inspector
+	if aim_marker_path != NodePath(""):
+		m = get_node_or_null(aim_marker_path) as Node3D
+	# 2) implicit child named "Target"
+	if m == null:
+		m = get_node_or_null("Target") as Node3D
+	# 3) fallback = center + small height
+	if m != null:
+		return m.global_position
+	return Vector3(
+		global_position.x,
+		_y_plane + aim_height_frac * _tile_w,
+		global_position.z
+	)

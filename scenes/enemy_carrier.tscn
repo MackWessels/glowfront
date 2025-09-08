@@ -455,9 +455,10 @@ shadow_mesh = SubResource("ArrayMesh_7pwao")
 size = Vector3(0.564697, 0.506104, 1)
 
 [node name="enemy_carrier" type="CharacterBody3D" groups=["enemy"]]
+collision_layer = 4
+collision_mask = 4
 script = ExtResource("1_jr3vp")
 minion_scene = ExtResource("2_jnyva")
-hole_path = NodePath("speeder/hole")
 
 [node name="speeder" type="Node3D" parent="."]
 transform = Transform3D(-1.31134e-08, 0, 0.3, 0, 0.3, 0, -0.3, 0, -1.31134e-08, 0, 0.5, 0)
@@ -532,9 +533,12 @@ transform = Transform3D(2.15346, 0, 0, 0, -0.000875096, 0.390903, 0, -0.0386031,
 mesh = SubResource("ArrayMesh_pxpuv")
 skeleton = NodePath("")
 
-[node name="hole" type="Marker3D" parent="speeder"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.373269, 0)
-
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.00524902, 0.798322, 0)
 shape = SubResource("BoxShape3D_jnyva")
+
+[node name="hole" type="Marker3D" parent="."]
+transform = Transform3D(-1.31134e-08, 0, 0.3, 0, 0.3, 0, -0.3, 0, -1.31134e-08, 0, 0.611981, 0)
+
+[node name="Target" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.843375, 0)

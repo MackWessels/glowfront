@@ -165,9 +165,10 @@ func _process(dt: float) -> void:
 	# Aim only when ready to shoot (prevents pointing at someone we won't fire at)
 	if target != null and is_instance_valid(target) and can_fire:
 		var tpos: Vector3 = Turret.global_position
-		var pos: Vector3 = target.global_position
-		pos.y = tpos.y
-		Turret.look_at(pos, Vector3.UP)
+		var aim: Vector3 = _aim_point_of(target)
+		# yaw-only: keep turret’s current height so the base doesn't pitch
+		aim.y = tpos.y
+		Turret.look_at(aim, Vector3.UP)
 		fire()
 
 	if _stats_window != null and _stats_window.visible:
@@ -430,11 +431,11 @@ func fire() -> void:
 		return
 	can_fire = false
 
-	# Re-aim at the primary we will actually shoot
+	# Re-aim at the primary we will actually shoot (yaw only)
 	var turret_pos: Vector3 = Turret.global_position
-	var aim_pos: Vector3 = primary.global_position
-	aim_pos.y = turret_pos.y
-	Turret.look_at(aim_pos, Vector3.UP)
+	var primary_aim: Vector3 = _aim_point_of(primary)
+	var yaw_aim: Vector3 = primary_aim; yaw_aim.y = turret_pos.y
+	Turret.look_at(yaw_aim, Vector3.UP)
 
 	# --- Multishot ---
 	var want: int = _compute_multishot_count()
@@ -461,7 +462,7 @@ func fire() -> void:
 	for v in victims:
 		if v == null or not is_instance_valid(v):
 			continue
-		var end_pos: Vector3 = v.global_position
+		var end_pos: Vector3 = _aim_point_of(v)              # ← aim at marker/offset
 		var to_vec: Vector3 = end_pos - from
 		var dist: float = to_vec.length()
 		if dist > max_range and dist > 0.0001:
@@ -475,6 +476,7 @@ func fire() -> void:
 
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
+
 
 func _apply_damage_final(enemy: Node, dmg: int) -> void:
 	if enemy and is_instance_valid(enemy) and enemy.has_method("take_damage"):
@@ -849,6 +851,18 @@ func toggle_stats_panel() -> void:
 		_set_range_ring_visible(true)
 		_update_range_ring()
 		dlg.popup_centered()
+
+
+# Where to aim on an enemy (carriers = hole marker; UFOs = fallback)
+func _aim_point_of(n: Node) -> Vector3:
+	if n != null and n.has_method("get_aim_point"):
+		return n.get_aim_point()
+	# fallback if the enemy doesn't implement the API
+	var n3 := n as Node3D
+	if n3 != null:
+		return n3.global_position
+	return Vector3.ZERO
+
 
 # =========================================================
 # Getters (HUD/PowerUps)

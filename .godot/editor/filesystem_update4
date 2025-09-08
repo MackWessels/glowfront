@@ -1,5 +1,6 @@
 res://scenes/enemy.tscn
-res://scripts/enemy_spawner.gd
+res://scripts/CarrierEnemy.gd
+res://scripts/enemy.gd
 res://scenes/main.tscn
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
@@ -14,5 +15,3 @@ res://scenes/mortar_tower.tscn
 res://scenes/mortar_shell.tscn
 res://scenes/miner_tower.tscn
 res://scenes/enemy_carrier.tscn
-res://scripts/CarrierEnemy.gd
-res://scripts/enemy.gd
