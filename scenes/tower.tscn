@@ -1,7 +1,6 @@
-[gd_scene load_steps=14 format=4 uid="uid://b22tilr55l82o"]
+[gd_scene load_steps=13 format=4 uid="uid://b22tilr55l82o"]
 
 [ext_resource type="Script" uid="uid://do7uhxbs26rue" path="res://scripts/tower.gd" id="1_2x682"]
-[ext_resource type="PackedScene" uid="uid://kjyp3nbsl47k" path="res://scenes/projectile.tscn" id="2_ay4al"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ofvlm"]
 albedo_color = Color(0.176645, 0.118852, 0.0336739, 1)
@@ -116,7 +115,6 @@ size = Vector3(2, 1, 2)
 
 [node name="Tower" type="Node3D" groups=["turrets"]]
 script = ExtResource("1_2x682")
-projectile_scene = ExtResource("2_ay4al")
 build_cost = 0
 
 [node name="tower_model" type="Node3D" parent="."]

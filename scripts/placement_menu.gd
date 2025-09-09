@@ -7,6 +7,7 @@ const ID_WALL   := 1
 const ID_REPAIR := 2
 const ID_MORTAR := 3
 const ID_MINER  := 4
+const ID_TESLA  := 5   # <-- NEW
 
 func _ready() -> void:
 	# Items are populated by the Tile right-click; we just relay selections.
@@ -20,3 +21,4 @@ func _on_item_selected(id: int) -> void:
 		ID_REPAIR: emit_signal("place_selected", "repair")
 		ID_MORTAR: emit_signal("place_selected", "mortar")
 		ID_MINER:  emit_signal("place_selected", "miner")
+		ID_TESLA:  emit_signal("place_selected", "tesla")   # <-- NEW

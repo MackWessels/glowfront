@@ -5,6 +5,7 @@ extends StaticBody3D
 @export var wall_scene: PackedScene
 @export var mortar_scene: PackedScene        # 2×2 mortar
 @export var miner_scene: PackedScene         # 1×1 mineral generator
+@export var tesla_scene: PackedScene        
 @export var placement_menu: PopupMenu
 
 @onready var _tile_mesh: MeshInstance3D = $"TileMesh"
@@ -70,6 +71,8 @@ func _input_event(_cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _sh
 				placement_menu.add_item("Repair", 2)
 			elif not has_turret and not is_wall:
 				placement_menu.add_item("Place Turret", 0)
+				if tesla_scene != null:
+					placement_menu.add_item("Place Tesla Tower", 5) # <-- NEW
 				placement_menu.add_item("Place Wall",   1)
 				if miner_scene != null:
 					placement_menu.add_item("Place Miner", 4)
@@ -78,6 +81,7 @@ func _input_event(_cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _sh
 			if placement_menu.item_count > 0:
 				placement_menu.position = get_viewport().get_mouse_position()
 				placement_menu.popup()
+
 
 # ---------- 1×1 placements ----------
 func place_turret() -> void:
@@ -115,6 +119,21 @@ func place_miner() -> void:
 		m.call("set_tile_context", tile_board, grid_position)
 	placed_object = m
 	has_turret = true   # treated as blocking building
+	set_wall(true)
+	blocked = true
+	is_broken = false
+	set_pending_blue(false)
+
+func place_tesla() -> void:                
+	if is_broken or tesla_scene == null: return
+	_clear_existing_object()
+	var t := tesla_scene.instantiate()
+	add_child(t)
+	if t is Node3D: (t as Node3D).global_transform = global_transform
+	if t and t.has_method("set_tile_context"):
+		t.call("set_tile_context", tile_board, grid_position)
+	placed_object = t
+	has_turret = true
 	set_wall(true)
 	blocked = true
 	is_broken = false
@@ -189,10 +208,12 @@ func is_walkable() -> bool:
 func apply_placement(action: String) -> void:
 	match action:
 		"turret": place_turret()
+		"tesla":  place_tesla()      # <-- NEW
 		"wall":   place_wall()
 		"mortar": place_mortar()
 		"miner":  place_miner()
 		"repair": repair_tile()
+
 
 func break_tile() -> void:
 	blocked = false

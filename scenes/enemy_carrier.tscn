@@ -452,7 +452,7 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_7pwao")
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_jnyva"]
-size = Vector3(0.564697, 0.506104, 1)
+size = Vector3(0.564697, 0.241638, 1)
 
 [node name="enemy_carrier" type="CharacterBody3D" groups=["enemy"]]
 collision_layer = 4
@@ -534,11 +534,11 @@ mesh = SubResource("ArrayMesh_pxpuv")
 skeleton = NodePath("")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.00524902, 0.798322, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.00524902, 1.0832, 0)
 shape = SubResource("BoxShape3D_jnyva")
 
 [node name="hole" type="Marker3D" parent="."]
-transform = Transform3D(-1.31134e-08, 0, 0.3, 0, 0.3, 0, -0.3, 0, -1.31134e-08, 0, 0.611981, 0)
+transform = Transform3D(-1.31134e-08, 0, 0.3, 0, 0.3, 0, -0.3, 0, -1.31134e-08, 0, 0.804122, 0)
 
 [node name="Target" type="Marker3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.843375, 0)
