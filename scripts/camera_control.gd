@@ -5,20 +5,18 @@ extends Camera3D
 @export var use_goal_start: bool = true
 
 # ---- Startup framing: above goal, looking INTO the board ----
-@export var start_back_distance: float = 6.0     # how far BEHIND the goal (along board direction)
-@export var start_hover: float = 12.0            # height above goal
-@export var start_pitch_bias_deg: float = -10.0  # extra tilt downward (negative looks down)
+@export var start_back_distance: float = 6.0
+@export var start_hover: float = 12.0
+@export var start_pitch_bias_deg: float = -10.0
 
-# Where to aim the camera initially
 @export_enum("center", "ahead_tiles") var look_target: String = "ahead_tiles"
-@export var aim_ahead_tiles: float = 2.0         # used if look_target = "ahead_tiles"
+@export var aim_ahead_tiles: float = 2.0
 
-# Zoom preferences for the initial pose
-@export var start_distance_override: float = -1.0 # if > 0, use exactly this distance
-@export var start_zoom_scale: float = 0.75       # otherwise scale computed distance (1.05 = tiny zoom out)
+@export var start_distance_override: float = -1.0
+@export var start_zoom_scale: float = 0.75
 
 # ---- Orbit state ----
-@export var focus_point: Vector3 = Vector3.ZERO  # orbit this point (no node needed)
+@export var focus_point: Vector3 = Vector3.ZERO
 @export var distance: float = 12.0
 @export var min_distance: float = 4.0
 @export var max_distance: float = 80.0
@@ -37,12 +35,19 @@ extends Camera3D
 @export var pan_fast_mult: float = 2.5
 @export var pan_slow_mult: float = 0.5
 
+# ---- Build/rotate integration (NEW) ----
+@export var build_manager_path: NodePath            # set to your BuildManager in the inspector (optional; auto-find if empty)
+@export var rotate_button_normal: int = MOUSE_BUTTON_LEFT
+@export var rotate_button_building: int = MOUSE_BUTTON_RIGHT
+
+var _build_mgr: Node = null
 var _rotating: bool = false
 var _pan_offset: Vector3 = Vector3.ZERO
 var _snapped_once: bool = false
 
 func _ready() -> void:
 	current = true
+	_resolve_build_manager()
 	if use_goal_start:
 		call_deferred("_try_snap_from_goal")
 
@@ -54,14 +59,15 @@ func _process(delta: float) -> void:
 	_update_transform()
 
 func _unhandled_input(event: InputEvent) -> void:
-	# Block mouse when over UI that accepts it
+	# If the pointer is over UI that accepts mouse, don't rotate/zoom the camera.
 	if _ui_pointer_blocks_mouse():
-		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
 			_rotating = false
 		return
 
 	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			# Always use RMB to orbit so LMB can place towers.
 			_rotating = event.pressed
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 			_apply_zoom(-zoom_step)
@@ -70,6 +76,22 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and _rotating:
 		yaw_deg   += event.relative.x * rotate_sensitivity
 		pitch_deg += event.relative.y * rotate_sensitivity
+
+# --- helpers ---
+var _bm_cached: Node = null
+func _bm() -> Node:
+	if _bm_cached and is_instance_valid(_bm_cached):
+		return _bm_cached
+	# If you want, set an @export var build_manager_path and try that first.
+	_bm_cached = get_tree().root.find_child("BuildManager", true, false)
+	return _bm_cached
+
+func _is_build_mode_active() -> bool:
+	var m := _bm()
+	if m and m.has_method("is_build_mode_active"):
+		return bool(m.call("is_build_mode_active"))
+	return false
+
 
 func _ui_pointer_blocks_mouse() -> bool:
 	var vp := get_viewport()
@@ -128,8 +150,7 @@ func _update_transform() -> void:
 	global_position = center - dir * distance
 	look_at(center, Vector3.UP)
 
-# ---------- Startup snapping (anchor to goal, look into board) ----------
-
+# ---------- Startup snapping (same as before) ----------
 func _try_snap_from_goal() -> void:
 	if _snapped_once: return
 	var tb := _get_tileboard()
@@ -154,15 +175,13 @@ func _on_tileboard_ready_once() -> void:
 
 func _snap_goal_over_board(tb: Node) -> void:
 	var goal_pos: Vector3 = Vector3(tb.call("get_goal_position"))
-	var spawn_pos: Vector3 = Vector3(tb.call("get_spawn_position")) # fallback aid
+	var spawn_pos: Vector3 = Vector3(tb.call("get_spawn_position"))
 
-	# Board center in world space
 	var sx: int = int(tb.get("board_size_x"))
 	var sz: int = int(tb.get("board_size_z"))
 	var mid := Vector2i(sx >> 1, sz >> 1)
 	var board_center: Vector3 = Vector3(tb.call("cell_to_world", mid))
 
-	# Direction INTO the board from the goal (flattened)
 	var into_board: Vector3 = board_center - goal_pos
 	into_board.y = 0.0
 	if into_board.length_squared() < 1e-6:
@@ -172,10 +191,8 @@ func _snap_goal_over_board(tb: Node) -> void:
 		into_board = Vector3(1, 0, 0)
 	into_board = into_board.normalized()
 
-	# Place camera behind the goal and above it
 	var cam_pos: Vector3 = goal_pos - into_board * start_back_distance + Vector3.UP * start_hover
 
-	# Choose look target: a bit into the board, or the true center
 	var center: Vector3
 	if look_target == "center":
 		center = board_center
@@ -183,13 +200,11 @@ func _snap_goal_over_board(tb: Node) -> void:
 		var tile_size: float = float(tb.get("tile_size"))
 		center = goal_pos + into_board * (tile_size * aim_ahead_tiles)
 
-	# Convert to orbit params (yaw/pitch/distance)
 	var diff: Vector3 = center - cam_pos
 	var base_dist: float = maxf(diff.length(), 0.001)
 
 	yaw_deg = rad_to_deg(atan2(diff.z, diff.x))
-	var y_ratio: float = diff.y / base_dist
-	y_ratio = clampf(y_ratio, -1.0, 1.0)
+	var y_ratio: float = clampf(diff.y / base_dist, -1.0, 1.0)
 	pitch_deg = rad_to_deg(asin(y_ratio)) + start_pitch_bias_deg
 
 	var desired_distance: float = clampf(base_dist, min_distance, max_distance)
@@ -210,3 +225,10 @@ func _get_tileboard() -> Node:
 		if n != null: return n
 	var list := get_tree().get_nodes_in_group("TileBoard")
 	return list[0] if list.size() > 0 else null
+
+# ---------- BuildManager helpers (NEW) ----------
+func _resolve_build_manager() -> void:
+	if build_manager_path != NodePath(""):
+		_build_mgr = get_node_or_null(build_manager_path)
+	if _build_mgr == null:
+		_build_mgr = get_tree().root.find_child("BuildManager", true, false)

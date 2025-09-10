@@ -1,264 +1,181 @@
 extends Node
 
-# -------- Scene refs (optional) --------
+# -------- Scene refs --------
 @export var tile_board_path: NodePath
 @export var camera_path: NodePath
-@export var drop_layer_path: NodePath                    # BuildDropLayer (Control) — optional
-
-# Optional toolbar buttons. If set, we’ll auto-connect them.
-@export var turret_button_path: NodePath
-@export var wall_button_path: NodePath
-@export var miner_button_path: NodePath
-@export var mortar_button_path: NodePath
-@export var tesla_button_path: NodePath                  # NEW
-
-# -------- Picking / layers --------
-const TILE_LAYER_MASK := 1 << 3   # layer 4
-const CURSOR_PX := 22
 
 # -------- State --------
 var _board: Node = null
 var _cam: Camera3D = null
-var _drop: Node = null
 
 # Actions: "", "turret", "wall", "miner", "mortar", "tesla"
 var _armed_action: String = ""
-var _drag_active: bool = false
+var _sticky: bool = false
 
 var _hover_tile: Node = null
-var _hover_tiles: Array[Node] = []   # multi-tile preview
 
+# Orb (visual)
+const CURSOR_PX := 22
 var _cursor_orb: TextureRect = null
-var _mouse_down_last: bool = false
+
+signal build_mode_changed(armed_action: String, sticky: bool)
 
 # ================= Lifecycle =================
 func _ready() -> void:
-	# Board
-	if tile_board_path != NodePath(""):
-		_board = get_node_or_null(tile_board_path)
-	if _board == null:
-		_board = get_tree().root.find_child("TileBoard", true, false)
-
-	# Camera
-	if camera_path != NodePath(""):
-		_cam = get_node_or_null(camera_path) as Camera3D
-	if _cam == null:
-		_cam = get_viewport().get_camera_3d()
-
-	# Drop layer (optional)
-	if drop_layer_path != NodePath(""):
-		_drop = get_node_or_null(drop_layer_path)
-
-	# Auto-wire toolbar buttons (optional)
-	_wire_button(turret_button_path, "turret")
-	_wire_button(wall_button_path,   "wall")
-	_wire_button(miner_button_path,  "miner")
-	_wire_button(mortar_button_path, "mortar")
-	_wire_button(tesla_button_path,  "tesla")   # NEW
-
+	_ensure_refs()
 	set_process(true)
+	set_process_unhandled_input(true)
 
-func _wire_button(p: NodePath, action: String) -> void:
-	if p == NodePath(""):
-		return
-	var n := get_node_or_null(p)
-	if n == null:
-		return
-	# If it’s a BaseButton, hook both quick-click and click-and-hold.
-	var bb := n as BaseButton
-	if bb:
-		if not bb.is_connected("button_down", Callable(self, "_on_toolbar_button_down")):
-			bb.button_down.connect(_on_toolbar_button_down.bind(action))
-		if not bb.is_connected("pressed", Callable(self, "_on_toolbar_pressed")):
-			bb.pressed.connect(_on_toolbar_pressed.bind(action))
-	else:
-		# Fallback: connect generic gui_input for mousedown
-		if not n.is_connected("gui_input", Callable(self, "_on_toolbar_gui_input")):
-			n.gui_input.connect(_on_toolbar_gui_input.bind(action))
-
-func _on_toolbar_button_down(action: String) -> void:
-	# Start a drag (click-and-hold). Ask drop layer to capture.
-	if _drop and _drop.has_method("enable_drag_capture"):
-		_drop.call("enable_drag_capture")
-	begin_drag(action)
-
-func _on_toolbar_pressed(action: String) -> void:
-	# Quick-click: arm build without drag.
-	arm_build(action)
-
-func _on_toolbar_gui_input(ev: InputEvent, action: String) -> void:
-	var mb := ev as InputEventMouseButton
-	if mb and mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
-		if _drop and _drop.has_method("enable_drag_capture"):
-			_drop.call("enable_drag_capture")
-		begin_drag(action)
-
-# ================= Public API (toolbar / menus) =================
-func begin_drag(action: String) -> void:
-	if not _is_valid_action(action):
-		return
-	_armed_action = action
-	_drag_active = true
-	_ensure_cursor_orb(true)
-	get_viewport().set_input_as_handled()
-
+# ================= Public API =================
 func arm_build(action: String) -> void:
-	if not _is_valid_action(action):
-		return
+	if not _is_valid_action(action): return
+	_ensure_refs()
 	_armed_action = action
-	_drag_active = false
+	_sticky = true
+	_emit_mode()
 	_ensure_cursor_orb(true)
-	get_viewport().set_input_as_handled()
 
-func _is_valid_action(a: String) -> bool:
-	return a == "turret" or a == "wall" or a == "miner" or a == "mortar" or a == "tesla"  # NEW
+func set_sticky(on: bool) -> void:
+	_sticky = on
+	_emit_mode()
+
+func cancel_build() -> void:
+	_sticky = false
+	_exit_build_mode()
+
+func is_build_mode_active() -> bool:
+	return _armed_action != ""
 
 # ================= Per-frame =================
 func _process(_dt: float) -> void:
-	if _cursor_orb:
+	_ensure_refs()
+
+	if _cursor_orb != null:
 		_cursor_orb.position = get_viewport().get_mouse_position() - Vector2(CURSOR_PX, CURSOR_PX)
 
-	if _armed_action != "" or _drag_active:
-		_set_hover_tile(_ray_pick_tile())
-
-		var down := Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-		if _mouse_down_last and not down:
-			_try_place_on_hover()
-		_mouse_down_last = down
-	else:
-		_mouse_down_last = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-
-func _exit_tree() -> void:
-	_ensure_cursor_orb(false)
+	if _armed_action != "":
+		var tile: Node = _ray_pick_tile()
+		if tile != _hover_tile:
+			if _board != null and _board.has_method("clear_active_tile") and _hover_tile != null:
+				_board.call("clear_active_tile", _hover_tile)
+			_hover_tile = tile
+			if _board != null and _board.has_method("set_active_tile"):
+				_board.call("set_active_tile", _hover_tile)
 
 # ================= Input (WORLD ONLY) =================
 func _unhandled_input(e: InputEvent) -> void:
-	if (_armed_action == "" and not _drag_active):
+	if _armed_action == "":
 		return
+
 	var mb := e as InputEventMouseButton
-	if mb and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
-		_exit_build_mode()
-
-# ================= Hover preview =================
-func _set_hover_tile(tile: Node) -> void:
-	for t in _hover_tiles:
-		if t and t.has_method("set_pending_blue"):
-			t.call("set_pending_blue", false)
-	_hover_tiles.clear()
-	_hover_tile = tile
-	if tile == null:
+	if mb == null:
 		return
 
-	var cells := _collect_tiles_for_action(tile, _armed_action)
-	for t2 in cells:
-		if t2 and t2.has_method("set_pending_blue"):
-			t2.call("set_pending_blue", true)
-		_hover_tiles.append(t2)
+	# LMB: place on current hover
+	if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+		var tile: Node = _ray_pick_tile()
+		if tile != null and _board != null and _board.has_method("request_build_on_tile"):
+			_board.call("request_build_on_tile", tile, _armed_action)
+		get_viewport().set_input_as_handled()
 
-# Generic collector that can handle 1x1 (most) and 2x2 (mortar). Board may override.
-func _collect_tiles_for_action(anchor: Node, action: String) -> Array[Node]:
-	var result: Array[Node] = []
-	if _board == null or anchor == null:
-		return result
+	# RMB: cancel
+	elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+		cancel_build()
+		get_viewport().set_input_as_handled()
 
-	var tiles_v: Variant = _board.get("tiles")
-	if typeof(tiles_v) != TYPE_DICTIONARY:
-		return result
-	var tiles: Dictionary = tiles_v
-
-	var pos: Vector2i
-	var gp_v: Variant = anchor.get("grid_position")
-	if typeof(gp_v) == TYPE_VECTOR2I:
-		pos = Vector2i(gp_v)
-	else:
-		pos = Vector2i(int(anchor.get("grid_x")), int(anchor.get("grid_z")))
-
-	var size := Vector2i(1, 1)
-
-	if _board != null and _board.has_method("footprint_for_action"):
-		var fp_v: Variant = _board.call("footprint_for_action", action)
-		if typeof(fp_v) == TYPE_VECTOR2I:
-			size = fp_v as Vector2i
-	else:
-		if action == "mortar":
-			size = Vector2i(2, 2)  
-
-	for dz in size.y:
-		for dx in size.x:
-			var c: Vector2i = pos + Vector2i(dx, dz)
-			if tiles.has(c):
-				var t: Node = tiles[c]
-				if t != null:
-					result.append(t)
-	return result
-
-# ================= Place =================
-func _try_place_on_hover() -> void:
-	if _hover_tile == null or _armed_action == "":
-		_exit_build_mode()
-		return
-
-	# Delegate placement + path checks to TileBoard.
-	if _board and _board.has_method("request_build_on_tile"):
-		_board.call("request_build_on_tile", _hover_tile, _armed_action)
-	else:
-		# Fallback if board doesn’t expose the helper.
-		if _hover_tile.has_method("apply_placement"):
-			_hover_tile.call("apply_placement", _armed_action)
-		if _board and _board.has_method("_recompute_flow"):
-			var ok: bool = bool(_board.call("_recompute_flow"))
-			if typeof(ok) == TYPE_BOOL and not ok and _hover_tile.has_method("repair_tile"):
-				_hover_tile.call("repair_tile")
-
-	_exit_build_mode()
-
+# ================= Exit / cleanup =================
 func _exit_build_mode() -> void:
-	for t in _hover_tiles:
-		if t and t.has_method("set_pending_blue"):
-			t.call("set_pending_blue", false)
-	_hover_tiles.clear()
+	if _board != null and _board.has_method("clear_active_tile"):
+		_board.call("clear_active_tile", _hover_tile)
 	_hover_tile = null
-
-	_drag_active = false
 	_armed_action = ""
+	_emit_mode()
 	_ensure_cursor_orb(false)
 
 # ================= Picking =================
 func _ray_pick_tile() -> Node:
-	if _cam == null:
-		_cam = get_viewport().get_camera_3d()
-	if _cam == null:
+	_ensure_refs()
+	if _cam == null or _board == null:
 		return null
 
-	var mp := get_viewport().get_mouse_position()
-	var from := _cam.project_ray_origin(mp)
-	var to := from + _cam.project_ray_normal(mp) * 2000.0
+	# Mouse ray
+	var mp: Vector2 = get_viewport().get_mouse_position()
+	var from: Vector3 = _cam.project_ray_origin(mp)
+	var to: Vector3 = from + _cam.project_ray_normal(mp) * 2000.0
+	var dir: Vector3 = (to - from).normalized()
 
-	var space := _cam.get_world_3d().direct_space_state
-	var p := PhysicsRayQueryParameters3D.create(from, to)
-	p.collide_with_areas = false
+	var space: PhysicsDirectSpaceState3D = _cam.get_world_3d().direct_space_state
+
+	# 1) Physics ray on ALL layers (bodies + areas)
+	var p: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(from, to)
 	p.collide_with_bodies = true
-	p.collision_mask = TILE_LAYER_MASK
+	p.collide_with_areas = true
+	p.collision_mask = 0x7FFFFFFF
+	var hit: Dictionary = space.intersect_ray(p)
+	if not hit.is_empty():
+		var col: Object = hit.get("collider")
+		if col != null:
+			var n: Node = col as Node
+			while n != null and not n.has_method("apply_placement"):
+				n = n.get_parent()
+			if n != null:
+				return n
 
-	var hit := space.intersect_ray(p)
-	if hit.is_empty():
+	# 2) Plane intersection (use tile Y if available)
+	var plane_y: float = _board.global_position.y
+	var tiles_v: Variant = _board.get("tiles")
+	if typeof(tiles_v) == TYPE_DICTIONARY and (tiles_v as Dictionary).size() > 0:
+		var vals: Array = (tiles_v as Dictionary).values()
+		var any_tile_v: Variant = vals[0]
+		var n3: Node3D = any_tile_v as Node3D
+		if n3 != null:
+			plane_y = n3.global_transform.origin.y
+	elif _board.has_method("cell_to_world"):
+		var ow_v: Variant = _board.call("cell_to_world", Vector2i(0, 0))
+		plane_y = Vector3(ow_v).y
+
+	var plane := Plane(Vector3.UP, plane_y)
+	var hitpos_opt: Variant = plane.intersects_ray(from, dir) # Vector3 or null
+	if hitpos_opt == null:
 		return null
+	var hitpos: Vector3 = hitpos_opt as Vector3
 
-	var col: Object = hit.get("collider")
-	if col == null:
-		return null
+	# world -> cell -> tile
+	if _board.has_method("world_to_cell"):
+		var cv: Variant = _board.call("world_to_cell", hitpos)
+		if typeof(cv) == TYPE_VECTOR2I:
+			var cell: Vector2i = cv as Vector2i
+			var tiles2: Dictionary = _board.get("tiles") as Dictionary
+			if tiles2.has(cell):
+				return tiles2[cell]
 
-	var n: Node = col as Node
-	while n and not n.has_method("apply_placement"):
-		n = n.get_parent()
-	return n
+	# 3) Nearest tile on XZ (last resort)
+	if typeof(tiles_v) == TYPE_DICTIONARY and (tiles_v as Dictionary).size() > 0:
+		var best: Node = null
+		var best_d: float = INF
+		var tiles3: Dictionary = tiles_v as Dictionary
+		for key_v in tiles3.keys():
+			var key: Vector2i = key_v as Vector2i
+			var pos_w: Vector3
+			if _board.has_method("cell_to_world"):
+				var pos_v: Variant = _board.call("cell_to_world", key)
+				pos_w = Vector3(pos_v)
+			else:
+				var node3: Node3D = tiles3[key_v] as Node3D
+				pos_w = (node3.global_transform.origin if node3 != null else Vector3.ZERO)
+			var d2: float = (Vector2(pos_w.x, pos_w.z) - Vector2(hitpos.x, hitpos.z)).length_squared()
+			if d2 < best_d:
+				best_d = d2
+				best = tiles3[key_v]
+		return best
+
+	return null
 
 # ================= Cursor orb =================
 func _ensure_cursor_orb(on: bool) -> void:
 	if on:
-		if _cursor_orb:
-			return
-		var tex := _make_circle_tex(CURSOR_PX)
+		if _cursor_orb != null: return
+		var tex: Texture2D = _make_circle_tex(CURSOR_PX)
 		var orb := TextureRect.new()
 		orb.texture = tex
 		orb.size = Vector2(CURSOR_PX, CURSOR_PX)
@@ -268,23 +185,48 @@ func _ensure_cursor_orb(on: bool) -> void:
 		get_tree().root.add_child(orb)
 		_cursor_orb = orb
 	else:
-		if _cursor_orb and is_instance_valid(_cursor_orb):
+		if _cursor_orb != null and is_instance_valid(_cursor_orb):
 			_cursor_orb.queue_free()
 		_cursor_orb = null
 
 func _make_circle_tex(sz: int) -> Texture2D:
-	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
+	var img: Image = Image.create(sz, sz, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
-	var r := float(sz) * 0.5 - 0.5
-	var cx := (float(sz) - 1.0) * 0.5
-	var cy := (float(sz) - 1.0) * 0.5
-	var ring := maxf(1.0, r * 0.16)
+	var r: float = float(sz) * 0.5 - 0.5
+	var cx: float = (float(sz) - 1.0) * 0.5
+	var cy: float = (float(sz) - 1.0) * 0.5
+	var ring: float = maxf(1.0, r * 0.16)
 	for y in sz:
 		for x in sz:
-			var dx := float(x) - cx
-			var dy := float(y) - cy
-			var d := sqrt(dx * dx + dy * dy)
-			var a := clampf(1.0 - absf(d - r) / ring, 0.0, 1.0)
+			var dx: float = float(x) - cx
+			var dy: float = float(y) - cy
+			var d: float = sqrt(dx * dx + dy * dy)
+			var a: float = clampf(1.0 - absf(d - r) / ring, 0.0, 1.0)
 			if a > 0.0:
 				img.set_pixel(x, y, Color(0, 0, 0, a))
 	return ImageTexture.create_from_image(img)
+
+# ================= Internals =================
+func _ensure_refs() -> void:
+	# Board
+	if _board == null:
+		if tile_board_path != NodePath(""):
+			_board = get_node_or_null(tile_board_path)
+		if _board == null:
+			var boards: Array = get_tree().get_nodes_in_group("TileBoard")
+			if boards.size() > 0:
+				_board = boards[0]
+		if _board == null:
+			_board = get_tree().root.find_child("TileBoard", true, false)
+	# Camera
+	if _cam == null:
+		if camera_path != NodePath(""):
+			_cam = get_node_or_null(camera_path) as Camera3D
+		if _cam == null:
+			_cam = get_viewport().get_camera_3d()
+
+func _is_valid_action(a: String) -> bool:
+	return a == "turret" or a == "wall" or a == "miner" or a == "mortar" or a == "tesla"
+
+func _emit_mode() -> void:
+	emit_signal("build_mode_changed", _armed_action, _sticky)
