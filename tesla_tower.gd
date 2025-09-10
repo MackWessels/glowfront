@@ -1,14 +1,23 @@
 extends Node3D
 class_name TeslaTower
 
+# ========= Placeable/Toolbar hooks (added for drag & drop) =========
+@export var placeable_id: String = "tesla"              # used by toolbar / build manager
+@export var footprint: Vector2i = Vector2i(1, 1)        # 1x1 by default; change if needed (e.g., 2x2)
+@export var toolbar_icon: Texture2D                     # optional: show in the bar if your UI uses icons
+
+func get_placeable_id() -> String:      return placeable_id
+func get_display_name() -> String:      return "Tesla Tower"
+func get_build_cost() -> int:           return build_cost
+func get_footprint() -> Vector2i:       return footprint
+func on_preview_active(active: bool) -> void: _set_range_ring_visible(active)
+func on_placed() -> void:               _set_range_ring_visible(false)  # hide ring once built
+
 # ========= Visuals (straight blue beam) =========
 @export var laser_width: float = 0.14
 @export var laser_duration: float = 0.06
-@export var laser_color_core = Color(1.0, 0.45, 0.0, 1.0)
-@export var laser_color_glow = Color(1.0, 0.30, 0.0, 0.75)
-
-
-
+@export var laser_color_core: Color = Color(0.35, 0.80, 1.00, 1.00)  # bright blue
+@export var laser_color_glow: Color = Color(0.20, 0.60, 1.00, 0.70)  # softer halo
 
 # ========= Base combat / pacing (mirror your turret) =====
 @export var base_damage: int = 1
@@ -49,8 +58,8 @@ func set_tile_context(board: Node, cell: Vector2i) -> void:
 
 # ========= Node refs ======================================
 @onready var DetectionArea: Area3D = $DetectionArea
-@export var muzzle_path: NodePath                     
-@onready var MuzzlePoint: Node3D = _resolve_muzzle()  
+@export var muzzle_path: NodePath
+@onready var MuzzlePoint: Node3D = _resolve_muzzle()
 
 var targets_in_range: Array[Node3D] = []
 var target: Node3D = null
@@ -79,12 +88,14 @@ var _true_damage_done: int = 0
 
 func _ready() -> void:
 	add_to_group("turret")
+	add_to_group("placeable") # <-- lets your BuildManager find it generically
 	_rng.randomize()
 
 	_resolve_minerals()
 	if tile_board_path != NodePath(""):
 		_tile_board = get_node_or_null(tile_board_path)
 
+	# Pay on spawn (matches your turret flow). If your BuildManager already paid, keep this true.
 	if not _attempt_build_payment():
 		build_denied.emit(build_cost)
 		queue_free()
@@ -103,6 +114,7 @@ func _ready() -> void:
 		PowerUps.changed.connect(_recompute_stats)
 
 	_recompute_stats()
+	_set_range_ring_visible(false)
 
 func _process(_dt: float) -> void:
 	# prune dead
@@ -209,7 +221,6 @@ func _fire_chain_like_powerup(primary: Node3D) -> void:
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
 
-
 func _do_hit_segment(from_pos: Vector3, enemy: Node3D, dmg: int) -> void:
 	if enemy == null or not is_instance_valid(enemy):
 		return
@@ -217,7 +228,6 @@ func _do_hit_segment(from_pos: Vector3, enemy: Node3D, dmg: int) -> void:
 	_apply_damage_final(enemy, dmg)
 	_spawn_laser_beam(from_pos, to_pos)
 	_hits_landed += 1
-
 	# Allow the *upgrade* chain to proc off these mimic hits as well
 	_call_chain_autoload(enemy, dmg, from_pos)
 
@@ -304,6 +314,7 @@ func _call_chain_autoload(start_enemy: Node3D, base_final_damage: int, start_pos
 		CL.call("try_proc", start_enemy, base_final_damage, self, start_pos)
 	elif CL.has_method("zap_chain"):
 		CL.call("zap_chain", start_pos, start_enemy, base_final_damage, self)
+
 
 # =========================================================
 # Economy
@@ -501,7 +512,6 @@ func _spawn_laser_beam(start_pos: Vector3, end_pos: Vector3) -> void:
 	tw.tween_property(core_mat, "emission:a", 0.0, laser_duration)
 	tw.tween_callback(root.queue_free)
 
-
 func _spawn_beam_segment(parent: Node3D, a: Vector3, b: Vector3) -> Array[StandardMaterial3D]:
 	var root: Node3D = Node3D.new()
 	root.name = "seg"
@@ -548,7 +558,6 @@ func _spawn_beam_segment(parent: Node3D, a: Vector3, b: Vector3) -> Array[Standa
 	out.append(core_mat)
 	out.append(glow_mat)
 	return out
-
 
 # =========================================================
 # Upgrades API (HUD hooks)

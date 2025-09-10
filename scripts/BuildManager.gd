@@ -10,6 +10,7 @@ extends Node
 @export var wall_button_path: NodePath
 @export var miner_button_path: NodePath
 @export var mortar_button_path: NodePath
+@export var tesla_button_path: NodePath                  # NEW
 
 # -------- Picking / layers --------
 const TILE_LAYER_MASK := 1 << 3   # layer 4
@@ -20,12 +21,12 @@ var _board: Node = null
 var _cam: Camera3D = null
 var _drop: Node = null
 
-# Actions: "", "turret", "wall", "miner", "mortar"
+# Actions: "", "turret", "wall", "miner", "mortar", "tesla"
 var _armed_action: String = ""
 var _drag_active: bool = false
 
 var _hover_tile: Node = null
-var _hover_tiles: Array[Node] = []   # multi-tile preview (mortar)
+var _hover_tiles: Array[Node] = []   # multi-tile preview
 
 var _cursor_orb: TextureRect = null
 var _mouse_down_last: bool = false
@@ -53,6 +54,7 @@ func _ready() -> void:
 	_wire_button(wall_button_path,   "wall")
 	_wire_button(miner_button_path,  "miner")
 	_wire_button(mortar_button_path, "mortar")
+	_wire_button(tesla_button_path,  "tesla")   # NEW
 
 	set_process(true)
 
@@ -109,7 +111,7 @@ func arm_build(action: String) -> void:
 	get_viewport().set_input_as_handled()
 
 func _is_valid_action(a: String) -> bool:
-	return a == "turret" or a == "wall" or a == "miner" or a == "mortar"
+	return a == "turret" or a == "wall" or a == "miner" or a == "mortar" or a == "tesla"  # NEW
 
 # ================= Per-frame =================
 func _process(_dt: float) -> void:
@@ -147,21 +149,18 @@ func _set_hover_tile(tile: Node) -> void:
 	if tile == null:
 		return
 
-	if _armed_action == "mortar":
-		var cells := _collect_mortar_tiles(tile)
-		for t2 in cells:
-			if t2 and t2.has_method("set_pending_blue"):
-				t2.call("set_pending_blue", true)
-			_hover_tiles.append(t2)
-	else:
-		if tile.has_method("set_pending_blue"):
-			tile.call("set_pending_blue", true)
-		_hover_tiles.append(tile)
+	var cells := _collect_tiles_for_action(tile, _armed_action)
+	for t2 in cells:
+		if t2 and t2.has_method("set_pending_blue"):
+			t2.call("set_pending_blue", true)
+		_hover_tiles.append(t2)
 
-func _collect_mortar_tiles(anchor: Node) -> Array[Node]:
+# Generic collector that can handle 1x1 (most) and 2x2 (mortar). Board may override.
+func _collect_tiles_for_action(anchor: Node, action: String) -> Array[Node]:
 	var result: Array[Node] = []
 	if _board == null or anchor == null:
 		return result
+
 	var tiles_v: Variant = _board.get("tiles")
 	if typeof(tiles_v) != TYPE_DICTIONARY:
 		return result
@@ -174,12 +173,23 @@ func _collect_mortar_tiles(anchor: Node) -> Array[Node]:
 	else:
 		pos = Vector2i(int(anchor.get("grid_x")), int(anchor.get("grid_z")))
 
-	for off in [Vector2i(0,0), Vector2i(1,0), Vector2i(0,1), Vector2i(1,1)]:
-		var c: Vector2i = pos + off
-		if tiles.has(c):
-			var t: Node = tiles[c]
-			if t != null:
-				result.append(t)
+	var size := Vector2i(1, 1)
+
+	if _board != null and _board.has_method("footprint_for_action"):
+		var fp_v: Variant = _board.call("footprint_for_action", action)
+		if typeof(fp_v) == TYPE_VECTOR2I:
+			size = fp_v as Vector2i
+	else:
+		if action == "mortar":
+			size = Vector2i(2, 2)  
+
+	for dz in size.y:
+		for dx in size.x:
+			var c: Vector2i = pos + Vector2i(dx, dz)
+			if tiles.has(c):
+				var t: Node = tiles[c]
+				if t != null:
+					result.append(t)
 	return result
 
 # ================= Place =================

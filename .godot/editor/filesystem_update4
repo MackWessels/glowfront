@@ -1,4 +1,5 @@
 res://scenes/main.tscn
+res://tesla_tower.gd
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
 res://scenes/enemy_spawner.tscn
@@ -13,8 +14,5 @@ res://scenes/mortar_tower.tscn
 res://scenes/mortar_shell.tscn
 res://scenes/miner_tower.tscn
 res://scenes/enemy_carrier.tscn
-res://tesla_tower.gd
 res://scenes/tesla_tower.tscn
-res://scripts/tile.gd
-res://scripts/placement_menu.gd
-res://scripts/power_ups.gd
+res://scripts/BuildManager.gd
