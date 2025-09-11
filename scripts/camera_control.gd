@@ -26,24 +26,24 @@ extends Camera3D
 @export var max_pitch_deg: float = -10.0
 
 # ---- Feel ----
-@export var rotate_sensitivity: float = 0.3
 @export var zoom_step: float = 2.0
-@export var keyboard_rotate_speed: float = 90.0
+@export var keyboard_rotate_speed: float = 90.0   # Q/E degrees per second
+@export var drag_pan_speed: float = 1.0           # ≈ world meters per screen pixel at current zoom
 
-# ---- Panning ----
+# ---- Keyboard panning ----
 @export var pan_speed: float = 20.0
 @export var pan_fast_mult: float = 2.5
 @export var pan_slow_mult: float = 0.5
 
-# ---- Build/rotate integration (NEW) ----
-@export var build_manager_path: NodePath            # set to your BuildManager in the inspector (optional; auto-find if empty)
-@export var rotate_button_normal: int = MOUSE_BUTTON_LEFT
-@export var rotate_button_building: int = MOUSE_BUTTON_RIGHT
-
+# ---- Build integration ----
+@export var build_manager_path: NodePath
 var _build_mgr: Node = null
-var _rotating: bool = false
+
+# ---- Internal state ----
 var _pan_offset: Vector3 = Vector3.ZERO
 var _snapped_once: bool = false
+var _mouse_panning: bool = false
+var _pan_start_focus: Vector3 = Vector3.ZERO
 
 func _ready() -> void:
 	current = true
@@ -52,37 +52,64 @@ func _ready() -> void:
 		call_deferred("_try_snap_from_goal")
 
 func _process(delta: float) -> void:
+	# Rotate with Q/E
 	if Input.is_key_pressed(KEY_Q): yaw_deg -= keyboard_rotate_speed * delta
 	if Input.is_key_pressed(KEY_E): yaw_deg += keyboard_rotate_speed * delta
+
 	_pan_with_keyboard(delta)
 	_clamp_state()
 	_update_transform()
 
 func _unhandled_input(event: InputEvent) -> void:
-	# If the pointer is over UI that accepts mouse, don't rotate/zoom the camera.
+	# Block camera input when cursor is over interactive UI.
 	if _ui_pointer_blocks_mouse():
-		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and not event.pressed:
-			_rotating = false
+		if event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_mouse_panning = false
 		return
 
 	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_RIGHT:
-			# Always use RMB to orbit so LMB can place towers.
-			_rotating = event.pressed
-		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_apply_zoom(-zoom_step)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_apply_zoom(zoom_step)
-	elif event is InputEventMouseMotion and _rotating:
-		yaw_deg   += event.relative.x * rotate_sensitivity
-		pitch_deg += event.relative.y * rotate_sensitivity
+		# Zoom with wheel
+		if event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_apply_zoom(-zoom_step); return
+		if event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_apply_zoom(zoom_step);  return
 
-# --- helpers ---
+		# LMB drag-to-pan when NOT in build/placement mode
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			if event.pressed:
+				if not _is_build_mode_active():
+					_mouse_panning = true
+					_pan_start_focus = _get_focus()
+			else:
+				_mouse_panning = false
+
+	elif event is InputEventMouseMotion:
+		# Smooth tablet-style panning: convert pixel delta to world delta.
+		if _mouse_panning and not _is_build_mode_active():
+			var px_scale := _pixels_to_world_scale()
+			var right := global_transform.basis.x; right.y = 0.0; right = right.normalized()
+			var fwd   := -global_transform.basis.z; fwd.y   = 0.0; fwd   = fwd.normalized()
+			# Drag right -> world moves to the left (subtract right * dx). Drag up -> move forward.
+			_pan_offset += (-right * event.relative.x + fwd * event.relative.y) * px_scale
+			_update_transform()
+
+# ---------------- Helpers ----------------
+func _pixels_to_world_scale() -> float:
+	# Convert 1 screen pixel of mouse drag to world meters at current zoom/FOV.
+	var h := float(get_viewport().get_visible_rect().size.y)
+	if h <= 0.0:
+		return 0.0
+	if projection == PROJECTION_PERSPECTIVE:
+		var meters_per_screen_height := 2.0 * distance * tan(deg_to_rad(fov) * 0.5)
+		return (meters_per_screen_height / h) * drag_pan_speed
+	else:
+		# Orthographic: 'size' is half the screen height in world units.
+		return (2.0 * size / h) * drag_pan_speed
+
 var _bm_cached: Node = null
 func _bm() -> Node:
 	if _bm_cached and is_instance_valid(_bm_cached):
 		return _bm_cached
-	# If you want, set an @export var build_manager_path and try that first.
 	_bm_cached = get_tree().root.find_child("BuildManager", true, false)
 	return _bm_cached
 
@@ -91,7 +118,6 @@ func _is_build_mode_active() -> bool:
 	if m and m.has_method("is_build_mode_active"):
 		return bool(m.call("is_build_mode_active"))
 	return false
-
 
 func _ui_pointer_blocks_mouse() -> bool:
 	var vp := get_viewport()
@@ -150,7 +176,7 @@ func _update_transform() -> void:
 	global_position = center - dir * distance
 	look_at(center, Vector3.UP)
 
-# ---------- Startup snapping (same as before) ----------
+# ---------- Startup snapping ----------
 func _try_snap_from_goal() -> void:
 	if _snapped_once: return
 	var tb := _get_tileboard()
@@ -226,7 +252,6 @@ func _get_tileboard() -> Node:
 	var list := get_tree().get_nodes_in_group("TileBoard")
 	return list[0] if list.size() > 0 else null
 
-# ---------- BuildManager helpers (NEW) ----------
 func _resolve_build_manager() -> void:
 	if build_manager_path != NodePath(""):
 		_build_mgr = get_node_or_null(build_manager_path)
