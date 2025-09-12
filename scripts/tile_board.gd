@@ -483,12 +483,45 @@ func _tile_is_walkable(cell: Vector2i) -> bool:
 	if _reserved_cells.has(cell): return false
 	if not tiles.has(cell): return false
 	var t: Node = tiles.get(cell, null)
-	if t and t.has_method("is_walkable"): return bool(t.call("is_walkable"))
+
+	# Explicit per-tile override
+	if t and t.has_method("is_walkable"):
+		return bool(t.call("is_walkable"))
+
+	# Optional boolean property
 	var v: Variant = t.get("walkable")
-	if typeof(v) == TYPE_BOOL: return v
-	if t.has_method("has_turret"): return not bool(t.call("has_turret"))
+	if typeof(v) == TYPE_BOOL:
+		return bool(v)
+
+	# Generic occupancy hooks
+	if t and t.has_method("has_structure"):
+		return not bool(t.call("has_structure"))
+	if t and t.has_method("has_turret"):
+		return not bool(t.call("has_turret"))
+
+	# NEW: any descendant that belongs to "building" group blocks the tile
+	if _node_or_desc_has_group(t, "building"):
+		return false
+
+	# Legacy fallback: child literally named "Tower"
 	var tower: Node = t.find_child("Tower", true, false)
 	return tower == null
+
+# --- Helpers: group check on a node OR any of its descendants ---
+func _node_or_desc_has_group(root: Node, group: String) -> bool:
+	if root == null:
+		return false
+	if root.is_in_group(group):
+		return true
+	# Fast path: if you prefer, you can loop the group list instead:
+	# for n in get_tree().get_nodes_in_group(group):
+	#     if root.is_ancestor_of(n): return true
+	# return false
+
+	for c in root.get_children():
+		if _node_or_desc_has_group(c as Node, group):
+			return true
+	return false
 
 
 func _path_ok_if_blocked(block_cells: Array[Vector2i]) -> bool:
@@ -815,7 +848,7 @@ func _on_place_selected(action: String) -> void:
 
 	# ---------------- Standard blocking (turret / wall) ----------------
 	var pos: Vector2i = active_tile.get("grid_position")
-	var blocks := (action == "turret" or action == "wall")
+	var blocks := (action == "turret" or action == "wall" or action == "miner")
 	var action_cost2 := _power_cost_for(action)
 
 	if blocks and action_cost2 > 0 and not _econ_can_afford(action_cost2):
