@@ -6,11 +6,17 @@ extends CanvasLayer
 @export var margin_bottom: int = 16
 @export var grid_h_separation: int = 6
 @export var grid_v_separation: int = 6
-@export var max_screen_height_ratio: float = 0.50  # HUD body height ≤ this fraction of screen
+
+# show exactly this many full rows; extra content scrolls
+@export var visible_rows: int = 3
+# small padding on top of the 3 rows (helps show scroll thumb nicely)
+@export var body_extra_px: int = 40
 
 const TAB_OFFENSE := 0
 const TAB_BASE := 1
 const TAB_ECON := 2
+
+const TAB_BAR_FALLBACK_H := 28.0
 
 var _panel: Control
 var _tabs: TabContainer
@@ -27,6 +33,10 @@ var _grid_econ: GridContainer
 var _cards_offense: Dictionary = {}
 var _cards_base: Dictionary = {}
 var _cards_econ: Dictionary = {}
+
+# --- Collapse/expand state ---
+var _collapsed: bool = false
+var _selected_tab: int = 0   # tracks the currently-active tab index
 
 func _ready() -> void:
 	# Root panel positioned bottom-left
@@ -73,19 +83,41 @@ func _ready() -> void:
 
 	# Events
 	get_viewport().size_changed.connect(_layout_panel)
-	_tabs.tab_changed.connect(func(_i: int) -> void:
-		_reset_scrolls()
-		_layout_panel()
-	)
-	if Economy.has_signal("balance_changed"):
+
+	# Keep _selected_tab current (deferred avoids the “collapse on tab switch” race)
+	_selected_tab = _tabs.current_tab
+	_tabs.tab_changed.connect(_on_tab_changed, Object.CONNECT_DEFERRED)
+
+	# Detect clicks on the TabBar so we only toggle when the SAME tab is clicked
+	var tb: TabBar = _tabs.get_tab_bar()
+	if tb and not tb.is_connected("tab_clicked", _on_tab_bar_clicked):
+		tb.tab_clicked.connect(_on_tab_bar_clicked)
+
+	if typeof(Economy) != TYPE_NIL and Economy.has_signal("balance_changed"):
 		Economy.balance_changed.connect(_on_balance_changed)
-	if PowerUps.has_signal("changed"):
+	if typeof(PowerUps) != TYPE_NIL and PowerUps.has_signal("changed"):
 		PowerUps.changed.connect(_refresh_all)
-	if PowerUps.has_signal("upgrade_purchased"):
+	if typeof(PowerUps) != TYPE_NIL and PowerUps.has_signal("upgrade_purchased"):
 		PowerUps.upgrade_purchased.connect(_on_upgrade_purchased)
 
 	_refresh_all()
 
+# ---------- collapse/expand handlers ----------
+func _on_tab_changed(i: int) -> void:
+	_selected_tab = i
+	_reset_scrolls()
+	_layout_panel()
+
+func _on_tab_bar_clicked(idx: int) -> void:
+	# Toggle ONLY if clicking the tab that's already active.
+	# We compare to _selected_tab (updated after real tab changes).
+	if idx == _selected_tab:
+		_collapsed = not _collapsed
+		_layout_panel()
+	# If a different tab was clicked, TabContainer will switch it;
+	# our deferred _on_tab_changed will run next frame and just relayout.
+
+# ---------- factories ----------
 func _make_grid() -> GridContainer:
 	var g := GridContainer.new()
 	g.columns = max(1, columns)
@@ -110,9 +142,26 @@ func _on_balance_changed(_bal: int) -> void:
 func _on_upgrade_purchased(_id: String, _lvl: int, _next_cost: int) -> void:
 	_refresh_all()
 
+# ---------- helpers ----------
+func _height_for_rows(rows: int) -> float:
+	rows = max(1, rows)
+	var h := float(rows) * card_min_size.y
+	if rows > 1:
+		h += float(rows - 1) * float(grid_v_separation)
+	return h
+
+func _tab_header_height() -> float:
+	var tb: TabBar = _tabs.get_tab_bar()
+	if tb:
+		var min_h: float = tb.get_minimum_size().y
+		var size_h: float = tb.size.y
+		var h: float = max(min_h, size_h)
+		return (h if h > 1.0 else TAB_BAR_FALLBACK_H)
+	return TAB_BAR_FALLBACK_H
+
 # ---------- layout ----------
 func _layout_panel() -> void:
-	# Active grid drives width/rows calc
+	# Active grid drives width calc (height is now unified across tabs)
 	var active_grid := (
 		_grid_offense if _tabs.current_tab == TAB_OFFENSE
 		else (_grid_base if _tabs.current_tab == TAB_BASE else _grid_econ)
@@ -120,17 +169,11 @@ func _layout_panel() -> void:
 	var active_count: int = int(active_grid.get_child_count())
 
 	var cols: int = max(1, columns)
-	var rows: int = (active_count + cols - 1) / cols if active_count > 0 else 0
-
 	var width: float = float(cols) * card_min_size.x
 	if cols > 1:
 		width += float(cols - 1) * float(grid_h_separation)
 
-	var content_h: float = float(rows) * card_min_size.y
-	if rows > 1:
-		content_h += float(rows - 1) * float(grid_v_separation)
-
-	# enforce per-card min size
+	# enforce per-card min size (all tabs)
 	for btn in _cards_offense.values():
 		(btn as Button).custom_minimum_size = card_min_size
 	for btn in _cards_base.values():
@@ -138,19 +181,31 @@ func _layout_panel() -> void:
 	for btn in _cards_econ.values():
 		(btn as Button).custom_minimum_size = card_min_size
 
-	# Visible body height is clamped; scrolling handles overflow
+	# Header height (tab bar)
+	var header_h: float = _tab_header_height()
+
+	# === Unified body height across tabs ===
 	var vp: Vector2 = Vector2(get_viewport().get_visible_rect().size)
-	var max_body: float = clampf(vp.y * max_screen_height_ratio, card_min_size.y + 8.0, vp.y - float(margin_bottom) - 40.0)
-	var body_h: float = min(content_h, max_body)
+	var target_rows_px: float = _height_for_rows(visible_rows) + float(body_extra_px)
+	var max_by_screen: float = max(card_min_size.y, vp.y - float(margin_bottom) - header_h - 8.0)
+	var body_h: float = min(target_rows_px, max_by_screen)
 
-	_scroll_offense.custom_minimum_size = Vector2(width, body_h)
-	_scroll_base.custom_minimum_size    = Vector2(width, body_h)
-	_scroll_econ.custom_minimum_size    = Vector2(width, body_h)
+	if _collapsed:
+		_scroll_offense.custom_minimum_size = Vector2(width, 0.0)
+		_scroll_base.custom_minimum_size    = Vector2(width, 0.0)
+		_scroll_econ.custom_minimum_size    = Vector2(width, 0.0)
 
-	# TabContainer height = body + tab bar height (~28px)
-	_tabs.custom_minimum_size = Vector2(width, body_h + 28.0)
-	_panel.custom_minimum_size = _tabs.custom_minimum_size
-	_panel.size = _tabs.custom_minimum_size
+		_tabs.custom_minimum_size = Vector2(width, header_h)
+		_panel.custom_minimum_size = _tabs.custom_minimum_size
+		_panel.size = _tabs.custom_minimum_size
+	else:
+		_scroll_offense.custom_minimum_size = Vector2(width, body_h)
+		_scroll_base.custom_minimum_size    = Vector2(width, body_h)
+		_scroll_econ.custom_minimum_size    = Vector2(width, body_h)
+
+		_tabs.custom_minimum_size = Vector2(width, body_h + header_h)
+		_panel.custom_minimum_size = _tabs.custom_minimum_size
+		_panel.size = _tabs.custom_minimum_size
 
 	# Anchor bottom-left
 	var x: float = float(margin_left)
@@ -244,16 +299,12 @@ func _refresh_card(id: String) -> void:
 
 # ---------- category / naming ----------
 func _category_for(id: String) -> int:
-	# Economy tab
 	if id.begins_with("eco_") or id.begins_with("miner_"):
 		return TAB_ECON
-	# Offense: turret_*, crit_*, chain_lightning_*
 	if id.begins_with("turret_") or id.begins_with("crit_") or id.begins_with("chain_lightning"):
 		return TAB_OFFENSE
-	# Base: spawner_*, base_*, board_* (expansions)
 	if id.begins_with("spawner_") or id.begins_with("base_") or id.begins_with("board_"):
 		return TAB_BASE
-	# Fallback: Offense
 	return TAB_OFFENSE
 
 func _pretty_name(id: String) -> String:
@@ -265,22 +316,18 @@ func _pretty_name(id: String) -> String:
 		"crit_mult":                return "Crit Damage"
 		"turret_multishot":         return "Multi-Shot"
 
-		# Chain Lightning
 		"chain_lightning_chance":   return "Chain Chance"
 		"chain_lightning_damage":   return "Chain Damage"
 		"chain_lightning_jumps":    return "Chain Jumps"
 
-		# Base / utility
 		"base_max_hp":              return "Max Health"
 		"base_regen":               return "Health Regen"
 		"spawner_health":           return "Spawner Health"
 
-		# Map expansions
 		"board_add_left":           return "Board Add Right"
 		"board_add_right":          return "Board Add Left"
 		"board_push_back":          return "Board Push Back"
 
-		# Economy (ids must match PowerUps.upgrades_config)
 		"eco_wave_stipend":         return "Wave Stipend"
 		"eco_perfect":              return "Eco Perfect"
 		"eco_bounty":               return "Eco Bounty"
@@ -292,7 +339,6 @@ func _pretty_name(id: String) -> String:
 # ---------- values / formatting ----------
 func _value_line(id: String, current_level: int) -> String:
 	match id:
-		# ---- Offense ----
 		"turret_damage":
 			var cur_dmg: int = PowerUps.turret_damage_value()
 			var nxt_dmg: int = PowerUps.next_turret_damage_value()
@@ -332,7 +378,6 @@ func _value_line(id: String, current_level: int) -> String:
 			var nxt_rem: int = int(round(nxt_ms - float(nxt_base - 1) * 100.0)); if nxt_rem < 0: nxt_rem = 0
 			return "%d +%d%% → %d +%d%%" % [cur_base, cur_rem, nxt_base, nxt_rem]
 
-		# ---- Chain Lightning ----
 		"chain_lightning_chance":
 			var curc: float = (PowerUps.chain_chance_value() if PowerUps.has_method("chain_chance_value") else 0.0) * 100.0
 			var nxtc: float = (PowerUps.next_chain_chance_value() if PowerUps.has_method("next_chain_chance_value") else 0.0) * 100.0
@@ -348,7 +393,6 @@ func _value_line(id: String, current_level: int) -> String:
 			var nxtj: int = (PowerUps.next_chain_jumps_value() if PowerUps.has_method("next_chain_jumps_value") else 0)
 			return "%d → %d" % [curj, nxtj]
 
-		# ---- Base / Utility ----
 		"base_max_hp":
 			var hinfo: Dictionary = PowerUps.health_max_info()
 			var cur_m: int = int(hinfo.get("current_max_hp", 0))
@@ -361,11 +405,9 @@ func _value_line(id: String, current_level: int) -> String:
 			var nxt_rg: float = float(rinfo2.get("next_regen_per_sec", 0.0))
 			return "%.2f/s → %.2f/s" % [cur_rg, nxt_rg]
 
-		# Board expansions: keep level progression visible
 		"board_add_left", "board_add_right", "board_push_back":
 			return "%d → %d" % [current_level, current_level + 1]
 
-		# ---- Economy (ids now match PowerUps) ----
 		"eco_wave_stipend":
 			var cur_stip: int = (PowerUps.eco_wave_stipend_value() if PowerUps.has_method("eco_wave_stipend_value") else current_level)
 			var nxt_stip: int = (PowerUps.next_eco_wave_stipend_value() if PowerUps.has_method("next_eco_wave_stipend_value") else current_level + 1)
@@ -392,7 +434,6 @@ func _value_line(id: String, current_level: int) -> String:
 			return "×%.2f → ×%.2f" % [cur_s, nxt_s]
 
 		_:
-			# Fallback: show level progression rather than "Lv N"
 			return "%d → %d" % [current_level, current_level + 1]
 
 # ---------- utils ----------
