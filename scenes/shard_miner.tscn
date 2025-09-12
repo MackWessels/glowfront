@@ -1,0 +1,28 @@
+[gd_scene load_steps=5 format=3 uid="uid://cky3mbt3rjpoi"]
+
+[ext_resource type="Script" uid="uid://b3jlbwknh8raq" path="res://shard_miner.gd" id="1_khng1"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_lr225"]
+size = Vector3(4, 1, 4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_80xi2"]
+albedo_color = Color(1, 1, 0.0901961, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_h57dp"]
+size = Vector3(4, 1, 4)
+
+[node name="shard_miner" type="Node3D"]
+script = ExtResource("1_khng1")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+mesh = SubResource("BoxMesh_lr225")
+surface_material_override/0 = SubResource("StandardMaterial3D_80xi2")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="."]
+collision_layer = 0
+collision_mask = 36
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+shape = SubResource("BoxShape3D_h57dp")

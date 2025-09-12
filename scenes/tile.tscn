@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3 uid="uid://bejcwxqtu5216"]
+[gd_scene load_steps=11 format=3 uid="uid://bejcwxqtu5216"]
 
 [ext_resource type="Script" uid="uid://dot378ganxpkr" path="res://scripts/tile.gd" id="1_3dk36"]
 [ext_resource type="PackedScene" uid="uid://b22tilr55l82o" path="res://scenes/tower.tscn" id="2_ywnoi"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://dh6q12bqaxf52" path="res://scenes/mortar_tower.tscn" id="4_q7utx"]
 [ext_resource type="PackedScene" uid="uid://ccppunipl7pvh" path="res://scenes/miner_tower.tscn" id="5_6p3j2"]
 [ext_resource type="PackedScene" uid="uid://xyisyayhgolg" path="res://scenes/tesla_tower.tscn" id="6_gtpg2"]
+[ext_resource type="PackedScene" uid="uid://cky3mbt3rjpoi" path="res://scenes/shard_miner.tscn" id="7_a2bny"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jy7pm"]
 albedo_color = Color(0.537011, 0.537011, 0.537011, 1)
@@ -26,6 +27,7 @@ wall_scene = ExtResource("3_jy7pm")
 mortar_scene = ExtResource("4_q7utx")
 miner_scene = ExtResource("5_6p3j2")
 tesla_scene = ExtResource("6_gtpg2")
+shard_miner_scene = ExtResource("7_a2bny")
 
 [node name="TileMesh" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.0877134, 0)

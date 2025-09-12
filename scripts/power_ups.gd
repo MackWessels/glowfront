@@ -60,7 +60,7 @@ func _try_spend(cost: int, reason: String = "") -> bool:
 	"board_push_back":   {"cost_sequence":[60,80,105,135,170,210], "max_level":0},
 
 	# =====================================================
-	# ECONOMY TAB
+	# ECONOMY TAB (in-run)
 	# =====================================================
 	# Miner: +yield per tick
 	"miner_yield":  {"cost_sequence":[15,25,40,60,85], "max_level":3},
@@ -157,6 +157,15 @@ func level(id: String) -> int:
 func begin_run() -> void:
 	_upgrades_state.clear()
 	_bounty_carry = 0.0
+
+	# Shard: Starting Minerals (grant once at run start)
+	var bonus := shards_starting_minerals_bonus()
+	if bonus > 0 and typeof(Economy) != TYPE_NIL:
+		if Economy.has_method("earn"):
+			Economy.earn(bonus, "start_minerals_shards")
+		elif Economy.has_method("add"):
+			Economy.add(bonus, "start_minerals_shards")
+
 	changed.emit()
 
 # =========================================================
@@ -274,7 +283,7 @@ func next_eco_perfect_bonus_pct_value() -> float:
 
 # --- Bounty bonus (% of kill bounty) ---
 func _bounty_pct_for_level(l: int) -> float:
-	return 0.15 * float(max(0, l))   # 15% per level
+	return 0.15 * float(max(0, l))   # 15% per level (in-run)
 
 func eco_bounty_bonus_pct_value() -> float:
 	return _bounty_pct_for_level(total_level("eco_bounty"))
@@ -310,14 +319,14 @@ func eco_perfect_info() -> Dictionary:
 		"available": upgrade_cost("eco_perfect") >= 0
 	}
 
-# --- Miner upgrades (unchanged) ---
+# --- Miner upgrades (in-run) ---
 func miner_yield_bonus_value() -> int:
 	return total_level("miner_yield")  # +1/tick per level
 
 func next_miner_yield_bonus_value() -> int:
 	return total_level("miner_yield") + 1
 
-# Interval scale: ×0.92, ×0.88, ×0.82…
+# Interval scale: ×0.92, ×0.88, ×0.82… (in-run)
 func miner_speed_scale_value() -> float:
 	match total_level("miner_speed"):
 		0: return 1.00
@@ -525,17 +534,22 @@ func chain_radius_value() -> float:
 func turret_damage_bonus() -> int: return turret_damage_value()
 func turret_damage_multiplier() -> float: return 1.0
 func damage_multiplier(kind: String = "") -> float: return 1.0
-func modified_cost(action: String, base: int) -> int: return base
+
+# Apply shard build discount globally to any action cost.
+func modified_cost(action: String, base: int) -> int:
+	var mult := shards_build_cost_discount_multiplier()
+	var out := int(round(float(max(0, base)) * mult))
+	return max(0, out)
 
 # =========================================================
 # ECONOMY RUNTIME HELPERS
 # =========================================================
 
 # --- Bounty ---
-# Each level adds +15% bounty.
+# In-run: +15% per level; Shards: +5% per level (by default) multiplicative.
 func bounty_multiplier() -> float:
-	var lvl: int = total_level("eco_bounty")
-	return 1.0 + 0.15 * float(lvl)
+	var run_mult := 1.0 + 0.15 * float(total_level("eco_bounty"))
+	return run_mult * shards_bounty_bonus_multiplier()
 
 # Award bounty for a single enemy kill.
 # Returns {"payout":int,"carry":float,"total":float,"mult":float}
@@ -649,3 +663,39 @@ func applied_for(id: String) -> int:
 		return int(Shards.get_meta_level(id))
 
 	return 0
+
+# =========================================================
+# ===== Economy Shards (permanent, from Shards.gd levels) ==
+# =========================================================
+const SHARD_START_MINERALS_PER_LVL := 10       # +10 starting minerals per shard level
+const SHARD_BOUNTY_PCT_PER_LVL     := 5.0      # +5% bounty per shard level
+const SHARD_BUILD_DISC_PCT_PER_LVL := 2.0      # +2% build cost discount per shard level
+const SHARD_MINER_SPEED_PER_LVL    := 0.15     # +15% faster per shard level (interval scaled by 1/(1+0.15*l))
+const SHARD_SHARDMINER_RATE_PER_LVL := 0.25    # +25% shards/min per shard level (2x2 shard miner)
+
+func shards_starting_minerals_bonus() -> int:
+	var l := meta_level("start_minerals")
+	return max(0, l) * SHARD_START_MINERALS_PER_LVL
+
+func shards_bounty_bonus_multiplier() -> float:
+	var l := meta_level("bounty_multiplier")
+	return 1.0 + (SHARD_BOUNTY_PCT_PER_LVL * float(max(0, l))) * 0.01
+
+func shards_build_cost_discount_multiplier() -> float:
+	var l := meta_level("build_cost_discount")
+	var pct := SHARD_BUILD_DISC_PCT_PER_LVL * float(max(0, l))
+	return clampf(1.0 - pct * 0.01, 0.0, 1.0)
+
+# 1×1 Miner global speed scale from shards (interval scale; <1 = faster)
+func miner_shards_speed_scale() -> float:
+	var l := meta_level("miner_rate")
+	return 1.0 / maxf(0.01, 1.0 + SHARD_MINER_SPEED_PER_LVL * float(max(0, l)))
+
+# 2×2 Shard Miner global rate multiplier from shards (>=1 = more shards/min)
+func shard_miner_rate_multiplier_from_shards() -> float:
+	var l := meta_level("shard_miner_rate")
+	return 1.0 + SHARD_SHARDMINER_RATE_PER_LVL * float(max(0, l))
+
+# Convenience: in-run miner speed × shard speed
+func miner_overall_speed_scale() -> float:
+	return miner_speed_scale_value() * miner_shards_speed_scale()

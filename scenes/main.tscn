@@ -190,6 +190,12 @@ text = "Miner"
 script = ExtResource("8_85g3d")
 action_name = "miner"
 
+[node name="ShardButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
+layout_mode = 2
+text = "Shard Miner"
+script = ExtResource("8_85g3d")
+action_name = "shard_miner"
+
 [node name="WallButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
 layout_mode = 2
 text = "Wall"

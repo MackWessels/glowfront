@@ -1,3 +1,7 @@
+res://shard_miner.gd
+res://scenes/shard_miner.tscn
+res://scripts/placement_menu.gd
+res://scripts/tile.gd
 res://scenes/main.tscn
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
@@ -14,4 +18,7 @@ res://scenes/mortar_shell.tscn
 res://scenes/miner_tower.tscn
 res://scenes/enemy_carrier.tscn
 res://scenes/tesla_tower.tscn
-res://scripts/camera_control.gd
+res://scripts/BuildManager.gd
+res://scripts/tile_board.gd
+res://scripts/power_ups.gd
+res://systems/shards.gd

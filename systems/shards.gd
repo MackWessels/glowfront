@@ -64,6 +64,14 @@ const META_DEFS := {
 	"board_add_left":   {"label":"Board Add Right", "tab":"Map", "costs":[60, 100, 150], "max":0},
 	"board_add_right":  {"label":"Board Add Left",  "tab":"Map", "costs":[60, 100, 150], "max":0},
 	"board_push_back":  {"label":"Board Push Back", "tab":"Map", "costs":[80, 120, 180], "max":0},
+
+	# Economy (NEW)
+	# These only define levels/costs here. We’ll wire effects in Economy/PowerUps next.
+	"start_minerals":       {"label":"Starting Minerals",     "tab":"Economy", "costs":[25, 45, 70, 100, 140], "max":0},
+	"bounty_multiplier":    {"label":"Kill Bounty +%",        "tab":"Economy", "costs":[35, 60, 90, 130, 180], "max":0},
+	"build_cost_discount":  {"label":"Build Cost Discount %", "tab":"Economy", "costs":[60, 95, 140, 200, 270], "max":0},
+	"miner_rate":           {"label":"1×1 Miner Rate",        "tab":"Economy", "costs":[30, 55, 85, 120, 160], "max":0},
+	"shard_miner_rate":     {"label":"Shard Miner Rate",      "tab":"Economy", "costs":[40, 70, 110, 160, 220], "max":0},
 }
 
 func get_meta_defs() -> Dictionary: return META_DEFS

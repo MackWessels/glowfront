@@ -188,9 +188,11 @@ func _econ_spend(cost_val: int) -> bool:
 
 func _cost_for_action(action: String) -> int:
 	match action:
-		"turret":  return turret_cost
-		"mortar":  return mortar_cost
-		_:         return 0
+		"turret":       return turret_cost
+		"mortar":       return mortar_cost
+		"shard_miner":  return mortar_cost   
+		_:              return 0
+
 
 func _placement_succeeded(tile: Node, action: String) -> bool:
 	match action:
@@ -201,6 +203,8 @@ func _placement_succeeded(tile: Node, action: String) -> bool:
 			return tower != null
 		_:
 			return true
+
+
 
 # ---------------- Board generation ----------------
 func generate_board() -> void:
@@ -692,6 +696,84 @@ func _on_place_selected(action: String) -> void:
 		_clear_pending()
 		return
 
+	# ---------------- Shard Miner (2×2 footprint) ----------------
+	if action == "shard_miner":
+		var anchor_sm: Vector2i = active_tile.get("grid_position")
+		var cells_sm := _footprint_cells_for(anchor_sm, Vector2i(2, 2))
+		var action_cost_sm := _power_cost_for("shard_miner")
+
+		# Affordability check
+		if action_cost_sm > 0 and not _econ_can_afford(action_cost_sm):
+			return
+
+		# Disallow in spawn opening strip
+		for csm in cells_sm:
+			if _is_in_spawn_opening(csm, spawner_span):
+				if active_tile.has_method("break_tile"):
+					active_tile.call("break_tile")
+				_emit_path_changed()
+				_clear_pending()
+				return
+
+		# Path test using real spawn openings (temporary block of 4 cells)
+		var ok_path_sm := _path_ok_if_blocked(cells_sm)
+		if not ok_path_sm:
+			if active_tile.has_method("break_tile"):
+				active_tile.call("break_tile")
+			_emit_path_changed()
+			_clear_pending()
+			return
+
+		# If enemies are on any of the 4 cells, reserve & defer
+		var any_enemies_sm := false
+		for csm2 in cells_sm:
+			if _enemies_on_cell(csm2).size() > 0:
+				any_enemies_sm = true
+				break
+
+		if any_enemies_sm:
+			for csm3 in cells_sm:
+				var tsm: Node = tiles.get(csm3, null)
+				if tsm and tsm.has_method("set_pending_blue"):
+					tsm.call("set_pending_blue", true)
+				_reserved_cells[csm3] = true
+			_recompute_flow()
+			_pending_builds.append({
+				"cell": anchor_sm,
+				"cells": cells_sm,
+				"tile": active_tile,
+				"action": "shard_miner",
+				"cost": action_cost_sm
+			})
+			_poll_accum = 0.0
+			_emit_path_changed()
+			return
+
+		# Place immediately
+		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
+			_pending_tile.call("set_pending_blue", false)
+		if active_tile.has_method("apply_placement"):
+			active_tile.call("apply_placement", "shard_miner")
+
+		var ok2_sm := _recompute_flow()
+		if not ok2_sm:
+			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
+			_recompute_flow()
+			_emit_path_changed()
+			_clear_pending()
+			return
+
+		# Charge cost on success
+		var placed_ok_sm := _placement_succeeded(active_tile, "shard_miner")
+		if placed_ok_sm and action_cost_sm > 0:
+			var paid_sm := _econ_spend(action_cost_sm)
+			if not paid_sm and active_tile.has_method("break_tile"):
+				active_tile.call("break_tile")
+
+		_emit_path_changed()
+		_clear_pending()
+		return
+
 	# ---------------- Standard blocking (turret / wall) ----------------
 	var pos: Vector2i = active_tile.get("grid_position")
 	var blocks := (action == "turret" or action == "wall")
@@ -758,6 +840,7 @@ func _on_place_selected(action: String) -> void:
 	_recompute_flow()
 	_emit_path_changed()
 	_clear_pending()
+
 
 
 # ---------------- Helpers ----------------
