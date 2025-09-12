@@ -14,10 +14,6 @@ var _sticky: bool = false
 
 var _hover_tile: Node = null
 
-# Orb (visual)
-const CURSOR_PX := 22
-var _cursor_orb: TextureRect = null
-
 signal build_mode_changed(armed_action: String, sticky: bool)
 
 # ================= Lifecycle =================
@@ -30,8 +26,8 @@ func _ready() -> void:
 func arm_build(action: String) -> void:
 	if not _is_valid_action(action): return
 	_ensure_refs()
-	# If we are already armed with the *same* action, just keep sticky on.
-	# If it's a different action, swap cleanly (clears highlight first).
+
+	# If switching actions while armed, clear previous highlight first.
 	if _armed_action != "" and _armed_action != action:
 		if _board != null and _board.has_method("clear_active_tile") and _hover_tile != null:
 			_board.call("clear_active_tile", _hover_tile)
@@ -40,7 +36,6 @@ func arm_build(action: String) -> void:
 	_armed_action = action
 	_sticky = true
 	_emit_mode()
-	_ensure_cursor_orb(true)
 
 func set_sticky(on: bool) -> void:
 	_sticky = on
@@ -56,9 +51,6 @@ func is_build_mode_active() -> bool:
 # ================= Per-frame =================
 func _process(_dt: float) -> void:
 	_ensure_refs()
-
-	if _cursor_orb != null:
-		_cursor_orb.position = get_viewport().get_mouse_position() - Vector2(CURSOR_PX, CURSOR_PX)
 
 	# Don’t raycast or highlight when pointer is over UI
 	if _armed_action != "":
@@ -81,25 +73,30 @@ func _unhandled_input(e: InputEvent) -> void:
 	if _armed_action == "":
 		return
 
-	# Ignore clicks that happen over UI
+	# Ignore clicks/keys that happen over UI
 	if _is_pointer_over_ui():
 		return
 
-	var mb := e as InputEventMouseButton
-	if mb == null:
-		return
-
 	# LMB: place on current hover
-	if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
+	var mb := e as InputEventMouseButton
+	if mb != null and mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed:
 		var tile: Node = _ray_pick_tile()
 		if tile != null and _board != null and _board.has_method("request_build_on_tile"):
 			_board.call("request_build_on_tile", tile, _armed_action)
 		get_viewport().set_input_as_handled()
+		return
 
 	# RMB or Escape: cancel
-	elif (mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed):
+	if mb != null and mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
 		cancel_build()
 		get_viewport().set_input_as_handled()
+		return
+
+	var kb := e as InputEventKey
+	if kb != null and kb.pressed and not kb.echo and kb.keycode == KEY_ESCAPE:
+		cancel_build()
+		get_viewport().set_input_as_handled()
+		return
 
 # ================= Exit / cleanup =================
 func _exit_build_mode() -> void:
@@ -108,7 +105,6 @@ func _exit_build_mode() -> void:
 	_hover_tile = null
 	_armed_action = ""
 	_emit_mode()
-	_ensure_cursor_orb(false)
 
 # ================= Picking =================
 func _ray_pick_tile() -> Node:
@@ -189,41 +185,6 @@ func _ray_pick_tile() -> Node:
 
 	return null
 
-# ================= Cursor orb =================
-func _ensure_cursor_orb(on: bool) -> void:
-	if on:
-		if _cursor_orb != null: return
-		var tex: Texture2D = _make_circle_tex(CURSOR_PX)
-		var orb := TextureRect.new()
-		orb.texture = tex
-		orb.size = Vector2(CURSOR_PX, CURSOR_PX)
-		orb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		orb.z_index = RenderingServer.CANVAS_ITEM_Z_MAX - 1
-		orb.position = get_viewport().get_mouse_position() - Vector2(CURSOR_PX, CURSOR_PX)
-		get_tree().root.add_child(orb)
-		_cursor_orb = orb
-	else:
-		if _cursor_orb != null and is_instance_valid(_cursor_orb):
-			_cursor_orb.queue_free()
-		_cursor_orb = null
-
-func _make_circle_tex(sz: int) -> Texture2D:
-	var img: Image = Image.create(sz, sz, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0, 0, 0, 0))
-	var r: float = float(sz) * 0.5 - 0.5
-	var cx: float = (float(sz) - 1.0) * 0.5
-	var cy: float = (float(sz) - 1.0) * 0.5
-	var ring: float = maxf(1.0, r * 0.16)
-	for y in sz:
-		for x in sz:
-			var dx: float = float(x) - cx
-			var dy: float = float(y) - cy
-			var d: float = sqrt(dx * dx + dy * dy)
-			var a: float = clampf(1.0 - absf(d - r) / ring, 0.0, 1.0)
-			if a > 0.0:
-				img.set_pixel(x, y, Color(0, 0, 0, a))
-	return ImageTexture.create_from_image(img)
-
 # ================= Internals =================
 func _ensure_refs() -> void:
 	# Board
@@ -251,12 +212,12 @@ func _emit_mode() -> void:
 
 # ================= UI Hover (Godot 4.x safe) =================
 func _is_pointer_over_ui() -> bool:
-	# Preferred in 4.x: ask the Window which Control is under the cursor
+	# Preferred: ask the Window which Control is under the cursor
 	var win := get_tree().root  # Window
 	if win and win.has_method("gui_get_hovered_control"):
 		return win.gui_get_hovered_control() != null
 
-	# Fallback for older 4.0/4.1 projects: some viewports still expose gui_pick
+	# Fallback for older 4.0/4.1 viewports
 	var vp := get_viewport()
 	if vp and vp.has_method("gui_pick"):
 		return vp.gui_pick(vp.get_mouse_position()) != null
