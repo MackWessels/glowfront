@@ -697,41 +697,40 @@ func _on_place_selected(action: String) -> void:
 		var cells := _footprint_cells_for(anchor, Vector2i(2, 2))
 		var action_cost := _power_cost_for("mortar")
 
-		# Affordability check
+		# Affordability
 		if action_cost > 0 and not _econ_can_afford(action_cost):
 			return
 
-		# Don't allow placing in the spawn opening strip
+		# Disallow in spawn opening strip
 		for c in cells:
 			if _is_in_spawn_opening(c, spawner_span):
-				if active_tile.has_method("break_tile"):
-					active_tile.call("break_tile")
-				_emit_path_changed()
+				_clear_pending()
+				return
+
+		# Footprint must be empty (no buildings on any of the 4 cells)
+		for c2 in cells:
+			if not _tile_is_walkable(c2):
 				_clear_pending()
 				return
 
 		# Path test using real spawn openings (temporary block)
 		var ok_path := _path_ok_if_blocked(cells)
 		if not ok_path:
-			if active_tile.has_method("break_tile"):
-				active_tile.call("break_tile")
-			_emit_path_changed()
 			_clear_pending()
 			return
 
-		# If any enemies are on any of the 4 cells, defer until clear
+		# Defer if enemies present on any of the 4 cells
 		var any_enemies := false
-		for c in cells:
-			if _enemies_on_cell(c).size() > 0:
+		for c3 in cells:
+			if _enemies_on_cell(c3).size() > 0:
 				any_enemies = true
 				break
 
 		if any_enemies:
-			for c in cells:
-				var t: Node = tiles.get(c, null)
-				if t and t.has_method("set_pending_blue"):
-					t.call("set_pending_blue", true)
-				_reserved_cells[c] = true
+			for c4 in cells:
+				var t4: Node = tiles.get(c4, null)
+				if t4 and t4.has_method("set_pending_blue"): t4.call("set_pending_blue", true)
+				_reserved_cells[c4] = true
 			_recompute_flow()
 			_pending_builds.append({
 				"cell": anchor,
@@ -774,41 +773,39 @@ func _on_place_selected(action: String) -> void:
 		var cells_sm := _footprint_cells_for(anchor_sm, Vector2i(2, 2))
 		var action_cost_sm := _power_cost_for("shard_miner")
 
-		# Affordability check
 		if action_cost_sm > 0 and not _econ_can_afford(action_cost_sm):
 			return
 
 		# Disallow in spawn opening strip
 		for csm in cells_sm:
 			if _is_in_spawn_opening(csm, spawner_span):
-				if active_tile.has_method("break_tile"):
-					active_tile.call("break_tile")
-				_emit_path_changed()
 				_clear_pending()
 				return
 
-		# Path test using real spawn openings (temporary block of 4 cells)
+		# Footprint must be empty
+		for csm2 in cells_sm:
+			if not _tile_is_walkable(csm2):
+				_clear_pending()
+				return
+
+		# Path test using real spawn openings (temporary block)
 		var ok_path_sm := _path_ok_if_blocked(cells_sm)
 		if not ok_path_sm:
-			if active_tile.has_method("break_tile"):
-				active_tile.call("break_tile")
-			_emit_path_changed()
 			_clear_pending()
 			return
 
-		# If enemies are on any of the 4 cells, reserve & defer
+		# Defer if enemies present on any of the 4 cells
 		var any_enemies_sm := false
-		for csm2 in cells_sm:
-			if _enemies_on_cell(csm2).size() > 0:
+		for csm3 in cells_sm:
+			if _enemies_on_cell(csm3).size() > 0:
 				any_enemies_sm = true
 				break
 
 		if any_enemies_sm:
-			for csm3 in cells_sm:
-				var tsm: Node = tiles.get(csm3, null)
-				if tsm and tsm.has_method("set_pending_blue"):
-					tsm.call("set_pending_blue", true)
-				_reserved_cells[csm3] = true
+			for csm4 in cells_sm:
+				var tsm: Node = tiles.get(csm4, null)
+				if tsm and tsm.has_method("set_pending_blue"): tsm.call("set_pending_blue", true)
+				_reserved_cells[csm4] = true
 			_recompute_flow()
 			_pending_builds.append({
 				"cell": anchor_sm,
@@ -835,7 +832,6 @@ func _on_place_selected(action: String) -> void:
 			_clear_pending()
 			return
 
-		# Charge cost on success
 		var placed_ok_sm := _placement_succeeded(active_tile, "shard_miner")
 		if placed_ok_sm and action_cost_sm > 0:
 			var paid_sm := _econ_spend(action_cost_sm)
@@ -846,18 +842,21 @@ func _on_place_selected(action: String) -> void:
 		_clear_pending()
 		return
 
-	# ---------------- Standard blocking (turret / wall) ----------------
+	# ---------------- Standard blocking (turret / wall / miner / tesla) ----------------
 	var pos: Vector2i = active_tile.get("grid_position")
-	var blocks := (action == "turret" or action == "wall" or action == "miner")
+	var blocks := (action == "turret" or action == "wall" or action == "miner" or action == "tesla")
 	var action_cost2 := _power_cost_for(action)
 
 	if blocks and action_cost2 > 0 and not _econ_can_afford(action_cost2):
 		return
 
-	# Don't allow blocking directly in the spawn opening
+	# Don’t allow blocking directly in the spawn opening
 	if blocks and _is_in_spawn_opening(pos, spawner_span):
-		if active_tile.has_method("break_tile"): active_tile.call("break_tile")
-		_emit_path_changed()
+		_clear_pending()
+		return
+
+	# NEW: cannot build on an already-occupied tile (just ignore; no break)
+	if blocks and not _tile_is_walkable(pos):
 		_clear_pending()
 		return
 
@@ -865,15 +864,12 @@ func _on_place_selected(action: String) -> void:
 		# Path test using real spawn openings (temporary block of this single cell)
 		var ok_path2 := _path_ok_if_blocked([pos])
 		if not ok_path2:
-			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
-			_emit_path_changed()
 			_clear_pending()
 			return
 
 		# If enemies currently on the cell, defer until clear
 		if _enemies_on_cell(pos).size() > 0:
-			if active_tile.has_method("set_pending_blue"):
-				active_tile.call("set_pending_blue", true)
+			if active_tile.has_method("set_pending_blue"): active_tile.call("set_pending_blue", true)
 			_reserve_cell(pos, true)
 			_recompute_flow()
 			_queue_pending_build(pos, active_tile, action, action_cost2)
@@ -888,6 +884,7 @@ func _on_place_selected(action: String) -> void:
 
 		var ok3 := _recompute_flow()
 		if not ok3:
+			# We only break if we already placed and it invalidated the path.
 			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
 			_recompute_flow()
 			_emit_path_changed()
