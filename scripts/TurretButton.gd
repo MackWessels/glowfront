@@ -1,6 +1,6 @@
 extends Button
 
-@export var action_name: String = "turret"  # turret, wall, miner, mortar, tesla
+@export var action_name: String = "turret"  # turret, wall, miner, mortar, tesla, shard_miner
 
 # --- Minimal, clean visuals you can tune in the Inspector ---
 @export var on_bg: Color = Color(0.20, 0.60, 1.00, 1.0)   # ON fill
@@ -24,6 +24,9 @@ var _sb_on_normal: StyleBoxFlat
 var _sb_on_hover: StyleBoxFlat
 var _sb_focus: StyleBoxFlat
 
+# guard so manager-driven updates don't fire our toggled handler
+var _syncing_from_manager := false
+
 func _ready() -> void:
 	toggle_mode = true
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -45,6 +48,10 @@ func disconnect_old_handlers() -> void:
 		disconnect("pressed", Callable(self, "_on_pressed"))
 
 func _on_toggled(pressed: bool) -> void:
+	# Ignore toggled events that we ourselves triggered during sync
+	if _syncing_from_manager:
+		return
+
 	if _mgr == null:
 		_apply_visual(pressed)
 		return
@@ -60,7 +67,16 @@ func _on_toggled(pressed: bool) -> void:
 
 func _on_build_mode_changed(armed_action: String, sticky: bool) -> void:
 	var pressed := (sticky and armed_action == action_name)
-	button_pressed = pressed
+
+	# IMPORTANT: do not emit toggled() when syncing from manager
+	_syncing_from_manager = true
+	if has_method("set_pressed_no_signal"):
+		set_pressed_no_signal(pressed)
+	else:
+		# Fallback (very old 4.x): best-effort; may still emit
+		button_pressed = pressed
+	_syncing_from_manager = false
+
 	_apply_visual(pressed)
 
 # ----------------- visuals -----------------
@@ -77,14 +93,14 @@ func _make_styles() -> void:
 func _style(bg: Color, border: Color, bw: int) -> StyleBoxFlat:
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = bg
-	sb.set_border_width_all(bw)          # no drop shadow; clean outline only
+	sb.set_border_width_all(bw)
 	sb.border_color = border
 	sb.corner_radius_top_left = corner_radius
 	sb.corner_radius_top_right = corner_radius
 	sb.corner_radius_bottom_left = corner_radius
 	sb.corner_radius_bottom_right = corner_radius
 	sb.set_content_margin_all(8.0)
-	sb.shadow_size = 0                   # ensure no shadow
+	sb.shadow_size = 0
 	sb.shadow_color = Color(0,0,0,0)
 	return sb
 

@@ -16,3 +16,5 @@ res://scenes/enemy_carrier.tscn
 res://scenes/tesla_tower.tscn
 res://scenes/shard_miner.tscn
 res://scripts/power_ups_hud.gd
+res://scripts/BuildManager.gd
+res://scripts/TurretButton.gd

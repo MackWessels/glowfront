@@ -30,6 +30,13 @@ func _ready() -> void:
 func arm_build(action: String) -> void:
 	if not _is_valid_action(action): return
 	_ensure_refs()
+	# If we are already armed with the *same* action, just keep sticky on.
+	# If it's a different action, swap cleanly (clears highlight first).
+	if _armed_action != "" and _armed_action != action:
+		if _board != null and _board.has_method("clear_active_tile") and _hover_tile != null:
+			_board.call("clear_active_tile", _hover_tile)
+		_hover_tile = null
+
 	_armed_action = action
 	_sticky = true
 	_emit_mode()
@@ -53,7 +60,14 @@ func _process(_dt: float) -> void:
 	if _cursor_orb != null:
 		_cursor_orb.position = get_viewport().get_mouse_position() - Vector2(CURSOR_PX, CURSOR_PX)
 
+	# Don’t raycast or highlight when pointer is over UI
 	if _armed_action != "":
+		if _is_pointer_over_ui():
+			if _board != null and _board.has_method("clear_active_tile") and _hover_tile != null:
+				_board.call("clear_active_tile", _hover_tile)
+			_hover_tile = null
+			return
+
 		var tile: Node = _ray_pick_tile()
 		if tile != _hover_tile:
 			if _board != null and _board.has_method("clear_active_tile") and _hover_tile != null:
@@ -67,6 +81,10 @@ func _unhandled_input(e: InputEvent) -> void:
 	if _armed_action == "":
 		return
 
+	# Ignore clicks that happen over UI
+	if _is_pointer_over_ui():
+		return
+
 	var mb := e as InputEventMouseButton
 	if mb == null:
 		return
@@ -78,8 +96,8 @@ func _unhandled_input(e: InputEvent) -> void:
 			_board.call("request_build_on_tile", tile, _armed_action)
 		get_viewport().set_input_as_handled()
 
-	# RMB: cancel
-	elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+	# RMB or Escape: cancel
+	elif (mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed):
 		cancel_build()
 		get_viewport().set_input_as_handled()
 
@@ -230,3 +248,17 @@ func _is_valid_action(a: String) -> bool:
 
 func _emit_mode() -> void:
 	emit_signal("build_mode_changed", _armed_action, _sticky)
+
+# ================= UI Hover (Godot 4.x safe) =================
+func _is_pointer_over_ui() -> bool:
+	# Preferred in 4.x: ask the Window which Control is under the cursor
+	var win := get_tree().root  # Window
+	if win and win.has_method("gui_get_hovered_control"):
+		return win.gui_get_hovered_control() != null
+
+	# Fallback for older 4.0/4.1 projects: some viewports still expose gui_pick
+	var vp := get_viewport()
+	if vp and vp.has_method("gui_pick"):
+		return vp.gui_pick(vp.get_mouse_position()) != null
+
+	return false

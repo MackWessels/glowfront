@@ -145,8 +145,6 @@ layout_mode = 2
 
 [node name="BuildManager" type="Node" parent="." groups=["build_manager"]]
 script = ExtResource("8_tipki")
-tile_board_path = NodePath("../TileBoard")
-camera_path = NodePath("../OverheadCamera")
 
 [node name="BuildUI" type="CanvasLayer" parent="."]
 layer = 50
