@@ -54,6 +54,29 @@ var _debug_mesh_enabled := false
 const ENEMY_GROUP: String = "enemy"
 const PENDING_POLL_HZ := 6.0
 
+
+# --- add these exports near your other Costs ---
+@export var wall_cost: int = 5
+@export var miner_cost: int = 10
+@export var tesla_cost: int = 10
+@export var shard_miner_cost: int = 20   # default matches old behavior (used to mirror mortar)
+
+# --- add this PUBLIC helper (buttons will call this) ---
+func get_action_cost(action: String) -> int:
+	# use the same path the board uses when actually charging
+	return _power_cost_for(action)
+
+func _cost_for_action(action: String) -> int:
+	match action:
+		"turret":       return turret_cost
+		"mortar":       return mortar_cost
+		"wall":         return wall_cost
+		"miner":        return miner_cost
+		"tesla":        return tesla_cost
+		"shard_miner":  return (shard_miner_cost if shard_miner_cost >= 0 else mortar_cost)
+		_:              return 0
+
+
 # ---------------- Signals ----------------
 signal global_path_changed
 
@@ -185,13 +208,6 @@ func _econ_spend(cost_val: int) -> bool:
 	else:
 		ok = _econ_balance() >= cost_val
 	return ok
-
-func _cost_for_action(action: String) -> int:
-	match action:
-		"turret":       return turret_cost
-		"mortar":       return mortar_cost
-		"shard_miner":  return mortar_cost   
-		_:              return 0
 
 
 func _placement_succeeded(tile: Node, action: String) -> bool:
