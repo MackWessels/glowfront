@@ -52,21 +52,29 @@ func is_build_mode_active() -> bool:
 func _process(_dt: float) -> void:
 	_ensure_refs()
 
-	# Don’t raycast or highlight when pointer is over UI
-	if _armed_action != "":
-		if _is_pointer_over_ui():
-			if _board != null and _board.has_method("clear_active_tile") and _hover_tile != null:
-				_board.call("clear_active_tile", _hover_tile)
-			_hover_tile = null
-			return
+	# If we're not armed, make sure any previous hover is cleared.
+	if _armed_action == "":
+		if _hover_tile != null and _board != null and _board.has_method("clear_active_tile"):
+			_board.call("clear_active_tile", _hover_tile)
+		_hover_tile = null
+		return
 
-		var tile: Node = _ray_pick_tile()
-		if tile != _hover_tile:
-			if _board != null and _board.has_method("clear_active_tile") and _hover_tile != null:
-				_board.call("clear_active_tile", _hover_tile)
-			_hover_tile = tile
-			if _board != null and _board.has_method("set_active_tile"):
-				_board.call("set_active_tile", _hover_tile)
+	# Don't raycast / highlight when the mouse is over UI
+	if _is_pointer_over_ui():
+		if _hover_tile != null and _board != null and _board.has_method("clear_active_tile"):
+			_board.call("clear_active_tile", _hover_tile)
+		_hover_tile = null
+		return
+
+	# Ray-pick the tile under the cursor and update the blue pending tiles.
+	var tile: Node = _ray_pick_tile()
+	if tile != _hover_tile:
+		if _hover_tile != null and _board != null and _board.has_method("clear_active_tile"):
+			_board.call("clear_active_tile", _hover_tile)
+		_hover_tile = tile
+		if _board != null and _board.has_method("set_active_tile"):
+			# Pass the armed action so TileBoard can show 1×1 or 2×2 pending highlight
+			_board.call("set_active_tile", _hover_tile, _armed_action)
 
 # ================= Input (WORLD ONLY) =================
 func _unhandled_input(e: InputEvent) -> void:

@@ -30,6 +30,9 @@ var _debug_mesh_enabled := false
 	get:
 		return _debug_mesh_enabled
 
+var _pending_hover_cells: Array[Vector2i] = []  # cells currently blue because of hover
+
+
 # Collision (Enemy on Layer 3, mask includes 2)
 @export var wall_collision_layer: int = 1 << 1
 @export var wall_collision_mask:  int = 1 << 2
@@ -161,26 +164,46 @@ func cell_center(c: Vector2i) -> Vector3: return cell_to_world(c)
 func is_in_bounds(c: Vector2i) -> bool: return _in_bounds(c)
 
 # ---------------- Pending/highlight ----------------
-func set_active_tile(tile: Node) -> void:
-	if tile == _pending_tile:
-		active_tile = tile
-		return
-	_clear_pending()
-	if tile and is_instance_valid(tile) and tile.has_method("set_pending_blue"):
+func set_active_tile(tile: Node, armed_action: String = "") -> void:
+	_clear_pending_hover()
+
+	if tile and is_instance_valid(tile):
 		_pending_tile = tile
-		active_tile   = tile
-		tile.call("set_pending_blue", true)
+		active_tile = tile
+
+		# Decide footprint size based on action
+		var size := Vector2i(1, 1)
+		if armed_action == "mortar" or armed_action == "shard_miner":
+			size = Vector2i(2, 2)
+
+		var anchor: Vector2i = tile.get("grid_position")
+		var cells := _footprint_cells_for(anchor, size)
+
+		for c in cells:
+			var t: Node = tiles.get(c, null)
+			if t and t.has_method("set_pending_blue"):
+				t.call("set_pending_blue", true)
+			_pending_hover_cells.append(c)
+
 
 func clear_active_tile(tile: Node = null) -> void:
 	if tile != null and tile != _pending_tile:
 		return
-	_clear_pending()
+	_clear_pending_hover()
 
 func _clear_pending() -> void:
-	if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
-		_pending_tile.call("set_pending_blue", false)
+	_clear_pending_hover()
+
+
+func _clear_pending_hover() -> void:
+	for c in _pending_hover_cells:
+		var t: Node = tiles.get(c, null)
+		if t and t.has_method("set_pending_blue"):
+			t.call("set_pending_blue", false)
+	_pending_hover_cells.clear()
 	_pending_tile = null
 	active_tile = null
+
 
 # ---------------- Economy ----------------
 func _econ_balance() -> int:
@@ -1206,11 +1229,10 @@ func free_tile(cell: Vector2i) -> void:
 
 func request_build_on_tile(tile: Node, action: String) -> void:
 	if tile == null or not is_instance_valid(tile): return
-	set_active_tile(tile)
+	set_active_tile(tile, action)   # pass action
 	_on_place_selected(action)
 
 func request_build_on_footprint(anchor_tile: Node, action: String, size: Vector2i) -> void:
 	if anchor_tile == null or not is_instance_valid(anchor_tile): return
-	set_active_tile(anchor_tile)
-	# _on_place_selected knows how to handle "mortar" (2×2)
+	set_active_tile(anchor_tile, action)  # pass action
 	_on_place_selected(action)
