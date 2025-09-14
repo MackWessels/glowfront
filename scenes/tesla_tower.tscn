@@ -1,6 +1,6 @@
 [gd_scene load_steps=18 format=4 uid="uid://xyisyayhgolg"]
 
-[ext_resource type="Script" uid="uid://df3ptkba8l7py" path="res://tesla_tower.gd" id="1_d0dp3"]
+[ext_resource type="Script" uid="uid://df3ptkba8l7py" path="res://scripts/tesla_tower.gd" id="1_d0dp3"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_mbxvu"]
 radius = 5.0

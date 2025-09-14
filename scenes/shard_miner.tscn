@@ -1,6 +1,6 @@
 [gd_scene load_steps=5 format=3 uid="uid://cky3mbt3rjpoi"]
 
-[ext_resource type="Script" uid="uid://b3jlbwknh8raq" path="res://shard_miner.gd" id="1_khng1"]
+[ext_resource type="Script" uid="uid://b3jlbwknh8raq" path="res://scripts/shard_miner.gd" id="1_khng1"]
 
 [sub_resource type="BoxMesh" id="BoxMesh_lr225"]
 size = Vector3(4, 1, 4)
