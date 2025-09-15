@@ -1,6 +1,6 @@
 extends Button
 
-@export var action_name: String = "turret"  # turret, wall, miner, mortar, tesla, shard_miner
+@export var action_name: String = "turret"  # turret, wall, miner, mortar, tesla, shard_miner, sniper
 @export var show_cost: bool = true
 @export var cost_prefix: String = "$ "
 @export var default_cost: int = 0          # fallback if TileBoard doesn’t expose a cost
@@ -120,7 +120,7 @@ func _lookup_base_cost() -> int:
 	if typeof(vprop) == TYPE_INT:
 		return int(vprop)
 
-	# Legacy/explicit property names for all known actions
+	# Legacy/explicit property names for all known actions (ADDED sniper)
 	var legacy := {
 		"turret":       "turret_cost",
 		"mortar":       "mortar_cost",
@@ -128,6 +128,7 @@ func _lookup_base_cost() -> int:
 		"miner":        "miner_cost",
 		"tesla":        "tesla_cost",
 		"shard_miner":  "shard_miner_cost",
+		"sniper":       "sniper_cost",   # NEW
 	}
 	if legacy.has(action_name):
 		var lv: Variant = _tileboard.get(String(legacy[action_name]))

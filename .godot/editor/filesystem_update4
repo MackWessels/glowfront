@@ -1,6 +1,8 @@
 res://scenes/sniper_tower.tscn
-res://scripts/sniper_tower.gd
+res://scripts/tile.gd
+res://scripts/tile_board.gd
 res://scenes/main.tscn
+res://scripts/BuildManager.gd
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
 res://scenes/enemy_spawner.tscn
@@ -15,3 +17,6 @@ res://scenes/mortar_tower.tscn
 res://scenes/mortar_shell.tscn
 res://scenes/miner_tower.tscn
 res://scenes/enemy_carrier.tscn
+res://scripts/TurretButton.gd
+res://scripts/sniper_tower.gd
+res://scripts/tower.gd

@@ -148,6 +148,7 @@ size = Vector3(2, 1, 2)
 script = ExtResource("1_8vriq")
 
 [node name="sniper_tower_model" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.210333, 0)
 
 [node name="TowerBase" type="MeshInstance3D" parent="sniper_tower_model"]
 transform = Transform3D(1, 0, 0, 0, 0.1, 0, 0, 0, 1, 0, -0.11, 0)
@@ -165,12 +166,13 @@ mesh = SubResource("ArrayMesh_13t61")
 skeleton = NodePath("")
 
 [node name="Barrel" type="MeshInstance3D" parent="sniper_tower_model/Turret"]
-transform = Transform3D(0, 0.3, 0, 0, 0, -0.153846, -0.25, 0, 0, 0.613442, -0.0284889, 0.00298407)
+transform = Transform3D(-0.25, -2.62268e-08, -6.72482e-09, 1.09278e-08, 5.73206e-16, -0.153846, 2.18557e-08, -0.3, 2.93951e-16, 0, 0, -0.849)
 mesh = SubResource("ArrayMesh_58bxw")
 skeleton = NodePath("")
 
 [node name="MuzzlePoint" type="Marker3D" parent="sniper_tower_model/Turret/Barrel"]
-transform = Transform3D(-0.883884, 0.883884, 4.11532e-15, -0.565686, -0.565686, 1.79329e-08, 6.02717e-08, 6.02717e-08, 0.999999, 0.0119361, 0.703062, 0.0419784)
+transform = Transform3D(0.976773, -0.367783, 0.103956, -0.106151, 0.0276501, 0.994521, -0.368643, -0.982457, -0.0109262, 0.0339488, 0.913653, 0.0396648)
+gizmo_extents = 1.82
 
 [node name="DetectionArea" type="Area3D" parent="."]
 visible = false

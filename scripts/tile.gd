@@ -2,6 +2,8 @@ extends StaticBody3D
 
 # Scenes / UI
 @export var turret_scene: PackedScene
+@export var sniper_scene: PackedScene        # 1×1 sniper tower (NEW)
+
 @export var wall_scene: PackedScene
 @export var mortar_scene: PackedScene        # 2×2 mortar
 @export var miner_scene: PackedScene         # 1×1 mineral generator
@@ -75,16 +77,20 @@ func _input_event(_cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _sh
 				placement_menu.add_item("Place Turret", 0)
 				if tesla_scene != null:
 					placement_menu.add_item("Place Tesla Tower", 5)
-				placement_menu.add_item("Place Wall",   1)
+				# NEW: sniper 1×1
+				if sniper_scene != null:
+					placement_menu.add_item("Place Sniper Tower", 7)
+				placement_menu.add_item("Place Wall", 1)
 				if miner_scene != null:
 					placement_menu.add_item("Place Miner", 4)
 				if mortar_scene != null:
 					placement_menu.add_item("Place Mortar (2x2)", 3)
 				if shard_miner_scene != null:
-					placement_menu.add_item("Place Shard Miner (2x2)", 6) # NEW
+					placement_menu.add_item("Place Shard Miner (2x2)", 6)
 			if placement_menu.item_count > 0:
 				placement_menu.position = get_viewport().get_mouse_position()
 				placement_menu.popup()
+
 
 # ---------- 1×1 placements ----------
 func place_turret() -> void:
@@ -141,6 +147,22 @@ func place_tesla() -> void:
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
+
+func place_sniper() -> void:
+	if is_broken or sniper_scene == null: return
+	_clear_existing_object()
+	var s := sniper_scene.instantiate()
+	add_child(s)
+	if s is Node3D: (s as Node3D).global_transform = global_transform
+	placed_object = s
+	has_turret = true
+	set_wall(true)
+	blocked = true
+	is_broken = false
+	set_pending_blue(false)
+	# proactively notify board (keeps pathing correct even if base tower code changes)
+	_recompute_after_block(grid_position, Vector2i(1, 1))
+
 
 # ---------- 2×2 mortar placement ----------
 func place_mortar() -> void:
@@ -292,11 +314,13 @@ func apply_placement(action: String) -> void:
 	match action:
 		"turret":      place_turret()
 		"tesla":       place_tesla()
+		"sniper":      place_sniper()       # NEW
 		"wall":        place_wall()
 		"mortar":      place_mortar()
 		"miner":       place_miner()
-		"shard_miner": place_shard_miner()   # NEW
+		"shard_miner": place_shard_miner()
 		"repair":      repair_tile()
+
 
 func break_tile() -> void:
 	blocked = false

@@ -63,6 +63,7 @@ const PENDING_POLL_HZ := 6.0
 @export var miner_cost: int = 10
 @export var tesla_cost: int = 10
 @export var shard_miner_cost: int = 20   # default matches old behavior (used to mirror mortar)
+@export var sniper_cost: int = 16   # cost for 1×1 sniper (NEW)
 
 # --- add this PUBLIC helper (buttons will call this) ---
 func get_action_cost(action: String) -> int:
@@ -77,7 +78,9 @@ func _cost_for_action(action: String) -> int:
 		"miner":        return miner_cost
 		"tesla":        return tesla_cost
 		"shard_miner":  return (shard_miner_cost if shard_miner_cost >= 0 else mortar_cost)
+		"sniper":       return (sniper_cost if sniper_cost >= 0 else turret_cost)   # NEW
 		_:              return 0
+
 
 
 # ---------------- Signals ----------------
@@ -235,13 +238,14 @@ func _econ_spend(cost_val: int) -> bool:
 
 func _placement_succeeded(tile: Node, action: String) -> bool:
 	match action:
-		"turret", "mortar":
+		"turret", "mortar", "sniper":   # NEW
 			if tile and tile.has_method("has_turret"):
 				return bool(tile.call("has_turret"))
 			var tower: Node = tile.find_child("Tower", true, false)
 			return tower != null
 		_:
 			return true
+
 
 
 
@@ -844,7 +848,7 @@ func _on_place_selected(action: String) -> void:
 
 	# ---------------- Standard blocking (turret / wall / miner / tesla) ----------------
 	var pos: Vector2i = active_tile.get("grid_position")
-	var blocks := (action == "turret" or action == "wall" or action == "miner" or action == "tesla")
+	var blocks := (action == "turret" or action == "wall" or action == "miner" or action == "tesla" or action == "sniper") 
 	var action_cost2 := _power_cost_for(action)
 
 	if blocks and action_cost2 > 0 and not _econ_can_afford(action_cost2):

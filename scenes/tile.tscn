@@ -1,7 +1,8 @@
-[gd_scene load_steps=11 format=3 uid="uid://bejcwxqtu5216"]
+[gd_scene load_steps=12 format=3 uid="uid://bejcwxqtu5216"]
 
 [ext_resource type="Script" uid="uid://dot378ganxpkr" path="res://scripts/tile.gd" id="1_3dk36"]
 [ext_resource type="PackedScene" uid="uid://b22tilr55l82o" path="res://scenes/tower.tscn" id="2_ywnoi"]
+[ext_resource type="PackedScene" uid="uid://dtme04wfa2kwk" path="res://scenes/sniper_tower.tscn" id="3_284l3"]
 [ext_resource type="PackedScene" uid="uid://dj63u8wsfoy7r" path="res://scenes/wall.tscn" id="3_jy7pm"]
 [ext_resource type="PackedScene" uid="uid://dh6q12bqaxf52" path="res://scenes/mortar_tower.tscn" id="4_q7utx"]
 [ext_resource type="PackedScene" uid="uid://ccppunipl7pvh" path="res://scenes/miner_tower.tscn" id="5_6p3j2"]
@@ -23,6 +24,7 @@ collision_layer = 8
 collision_mask = 8
 script = ExtResource("1_3dk36")
 turret_scene = ExtResource("2_ywnoi")
+sniper_scene = ExtResource("3_284l3")
 wall_scene = ExtResource("3_jy7pm")
 mortar_scene = ExtResource("4_q7utx")
 miner_scene = ExtResource("5_6p3j2")

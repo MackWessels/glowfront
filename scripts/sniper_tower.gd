@@ -1,35 +1,58 @@
-# sniper_tower.gd
-# Make sure this path matches your project
+# res://scripts/sniper_tower.gd
 extends "res://scripts/tower.gd"
 class_name SniperTower
 
 func _ready() -> void:
-	# --- Sniper balance knobs (APPLY BEFORE super._ready) ---
-	# End-of-pipeline multipliers (already exist in tower.gd)
-	rate_mult_end   = 1.80   # slower fire
-	range_mult_end  = 2.00   # much longer reach
-	damage_mult_end = 1.20   # small damage bump
+	# ---- Wire required nodes (do this BEFORE super._ready) ----
+	DetectionArea = get_node_or_null("DetectionArea") as Area3D
+	ClickBody     = get_node_or_null("StaticBody3D") as StaticBody3D
 
-	# Build/economy (already exist in tower.gd)
-	build_cost = 16
+	# Aim pivot: prefer TurretPivot; fall back to Turret; then recursive search
+	var pivot: Node3D = get_node_or_null("sniper_tower_model/TurretPivot") as Node3D
+	if pivot == null:
+		pivot = get_node_or_null("sniper_tower_model/Turret") as Node3D
+	if pivot == null:
+		pivot = find_child("TurretPivot", true, false) as Node3D
+	if pivot == null:
+		pivot = find_child("Turret", true, false) as Node3D
+	Turret = pivot
 
-	# Beam clamp helper from base (already exists in tower.gd)
-	max_range = 120.0
+	# Muzzle point at the barrel tip (try pivoted and non-pivoted paths, then fallback search)
+	var mp: Node3D = get_node_or_null("sniper_tower_model/TurretPivot/TurretModel/Barrel/MuzzlePoint") as Node3D
+	if mp == null:
+		mp = get_node_or_null("sniper_tower_model/Turret/Barrel/MuzzlePoint") as Node3D
+	if mp == null:
+		mp = find_child("MuzzlePoint", true, false) as Node3D
+	if mp != null:
+		MuzzlePoint = mp
 
-	# Visual feel (already exist in tower.gd)
+	# ---- Sniper tuning ----
+	rate_mult_end   = 1.80      # slower fire
+	range_mult_end  = 2.00      # longer acquire
+	damage_mult_end = 1.20
+	build_cost      = 16
+	max_range       = 120.0
+
+	# visuals
 	laser_width      = 0.08
 	laser_duration   = 0.09
 	range_ring_color = Color(0.2, 0.8, 1.0, 0.30)
 
-	# Run the normal turret setup (payment, signals, recompute, etc.)
+	# Allow pitch for sniper only (base turret defaults to yaw_only = true)
+	yaw_only = false
+
+	# ---- Run base setup ----
 	super._ready()
 
-	# Cosmetic: if stats dialog is already created, rename it
+	# Some scenes might have reassigned Turret in super._ready(); ensure our pivot wins
+	if Turret == null:
+		Turret = pivot
+
+	# cosmetics
 	if _stats_window != null:
 		_stats_window.title = "Sniper Tower"
 
-# (Optional) If you want the dialog title to always be "Sniper Tower"
-# even when opened later, you can override the creator lightly:
+
 func _ensure_stats_dialog() -> AcceptDialog:
 	var dlg := super._ensure_stats_dialog()
 	dlg.title = "Sniper Tower"

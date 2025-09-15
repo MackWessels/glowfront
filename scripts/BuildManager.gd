@@ -8,7 +8,7 @@ extends Node
 var _board: Node = null
 var _cam: Camera3D = null
 
-# Actions: "", "turret", "wall", "miner", "mortar", "tesla", "shard_miner"
+# Actions: "", "turret", "wall", "miner", "mortar", "tesla", "shard_miner", "sniper"  # +sniper
 var _armed_action: String = ""
 var _sticky: bool = false
 
@@ -213,7 +213,7 @@ func _ensure_refs() -> void:
 			_cam = get_viewport().get_camera_3d()
 
 func _is_valid_action(a: String) -> bool:
-	return a == "turret" or a == "wall" or a == "miner" or a == "mortar" or a == "tesla" or a == "shard_miner"
+	return a == "turret" or a == "wall" or a == "miner" or a == "mortar" or a == "tesla" or a == "shard_miner" or a == "sniper"  # +sniper
 
 func _emit_mode() -> void:
 	emit_signal("build_mode_changed", _armed_action, _sticky)

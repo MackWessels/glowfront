@@ -39,6 +39,9 @@ var range_level: int = 0
 @export var range_mult_end: float = 1.0
 @export var damage_mult_end: float = 1.0
 
+# Yaw lock (regular turret=true; sniper sets to false)
+@export var yaw_only: bool = true
+
 # ---------- Chain lightning (autoload bridge helpers) ----------
 @export var chain_debug_prints: bool = true
 @export var chain_force_test: bool = false   # set true to force zaps for verification
@@ -61,10 +64,10 @@ func set_tile_context(board: Node, cell: Vector2i) -> void:
 	_tile_cell  = cell
 
 # ---------- Targeting ----------
-@onready var DetectionArea: Area3D   = $DetectionArea
-@onready var Turret: Node3D          = $tower_model/Turret
-@onready var MuzzlePoint: Node3D     = $tower_model/Turret/Barrel/MuzzlePoint
-@onready var ClickBody: StaticBody3D = $StaticBody3D
+var DetectionArea: Area3D = null
+var Turret: Node3D = null
+var MuzzlePoint: Node3D = null
+var ClickBody: StaticBody3D = null
 var can_fire: bool = true
 var target: Node3D = null
 var targets_in_range: Array[Node3D] = []
@@ -105,6 +108,9 @@ var _range_ring: MeshInstance3D = null
 func _ready() -> void:
 	add_to_group("turret")
 
+	# Bind nodes in a path-agnostic way (supports different scene hierarchies)
+	_bind_nodes_if_missing()
+
 	_resolve_minerals()
 	if tile_board_path != NodePath(""):
 		_tile_board = get_node_or_null(tile_board_path)
@@ -116,19 +122,25 @@ func _ready() -> void:
 	_spent_local += max(0, build_cost)
 	build_paid.emit(build_cost)
 
-	DetectionArea.body_entered.connect(_on_body_entered)
-	DetectionArea.body_exited.connect(_on_body_exited)
+	if DetectionArea:
+		DetectionArea.body_entered.connect(_on_body_entered)
+		DetectionArea.body_exited.connect(_on_body_exited)
 	if ClickBody and not ClickBody.is_connected("input_event", Callable(self, "_on_clickbody_input")):
 		ClickBody.input_event.connect(_on_clickbody_input)
 
-	_anim = get_node_or_null("tower_model/AnimationPlayer") as AnimationPlayer
-	if _anim == null:
-		_anim = get_node_or_null("AnimationPlayer") as AnimationPlayer
-	_muzzle_particles = MuzzlePoint.get_node_or_null("MuzzleFlash")
-	if _muzzle_particles == null:
-		_muzzle_particles = MuzzlePoint.get_node_or_null("GPUParticles3D")
-	if _muzzle_particles == null:
-		_muzzle_particles = MuzzlePoint.get_node_or_null("CPUParticles3D")
+	# Flexible FX lookups
+	_anim = _try_node([
+		"tower_model/AnimationPlayer",
+		"sniper_tower_model/AnimationPlayer",
+		"AnimationPlayer"
+	]) as AnimationPlayer
+
+	if MuzzlePoint:
+		_muzzle_particles = MuzzlePoint.get_node_or_null("MuzzleFlash")
+		if _muzzle_particles == null:
+			_muzzle_particles = MuzzlePoint.get_node_or_null("GPUParticles3D")
+		if _muzzle_particles == null:
+			_muzzle_particles = MuzzlePoint.get_node_or_null("CPUParticles3D")
 
 	_gather_range_shapes()
 	if base_acquire_range <= 0.0:
@@ -163,11 +175,11 @@ func _process(dt: float) -> void:
 			_connect_target_signals(target)
 
 	# Aim only when ready to shoot (prevents pointing at someone we won't fire at)
-	if target != null and is_instance_valid(target) and can_fire:
+	if Turret != null and target != null and is_instance_valid(target) and can_fire:
 		var tpos: Vector3 = Turret.global_position
 		var aim: Vector3 = _aim_point_of(target)
-		# yaw-only: keep turret’s current height so the base doesn't pitch
-		aim.y = tpos.y
+		if yaw_only:
+			aim.y = tpos.y   # lock pitch for regular turrets
 		Turret.look_at(aim, Vector3.UP)
 		fire()
 
@@ -425,17 +437,21 @@ func _current_valid_target() -> Node3D:
 	return _select_target()
 
 func fire() -> void:
+	if Turret == null or MuzzlePoint == null:
+		return
 	# Lock a primary target for this shot (ensures we shoot what we're aiming at)
 	var primary: Node3D = _current_valid_target()
 	if primary == null:
 		return
 	can_fire = false
 
-	# Re-aim at the primary we will actually shoot (yaw only)
+	# Re-aim at the primary we will actually shoot
 	var turret_pos: Vector3 = Turret.global_position
 	var primary_aim: Vector3 = _aim_point_of(primary)
-	var yaw_aim: Vector3 = primary_aim; yaw_aim.y = turret_pos.y
-	Turret.look_at(yaw_aim, Vector3.UP)
+	var final_aim: Vector3 = primary_aim
+	if yaw_only:
+		final_aim.y = turret_pos.y
+	Turret.look_at(final_aim, Vector3.UP)
 
 	# --- Multishot ---
 	var want: int = _compute_multishot_count()
@@ -477,7 +493,6 @@ func fire() -> void:
 	await get_tree().create_timer(_current_fire_rate).timeout
 	can_fire = true
 
-
 func _apply_damage_final(enemy: Node, dmg: int) -> void:
 	if enemy and is_instance_valid(enemy) and enemy.has_method("take_damage"):
 		enemy.call("take_damage", {"final": dmg, "source": "turret", "by": self})
@@ -516,7 +531,8 @@ func _call_chain_autoload(start_enemy: Node3D, base_final_damage: int, start_pos
 # =========================================================
 func _gather_range_shapes() -> void:
 	_range_shapes.clear()
-	_collect_shapes_recursive(DetectionArea)
+	if DetectionArea:
+		_collect_shapes_recursive(DetectionArea)
 
 func _collect_shapes_recursive(n: Node) -> void:
 	for c in n.get_children():
@@ -852,17 +868,14 @@ func toggle_stats_panel() -> void:
 		_update_range_ring()
 		dlg.popup_centered()
 
-
 # Where to aim on an enemy (carriers = hole marker; UFOs = fallback)
 func _aim_point_of(n: Node) -> Vector3:
 	if n != null and n.has_method("get_aim_point"):
 		return n.get_aim_point()
-	# fallback if the enemy doesn't implement the API
 	var n3 := n as Node3D
 	if n3 != null:
 		return n3.global_position
 	return Vector3.ZERO
-
 
 # =========================================================
 # Getters (HUD/PowerUps)
@@ -877,3 +890,39 @@ func get_base_acquire_range() -> float:        return float(base_acquire_range)
 func get_range_per_level() -> float:           return float(range_per_level)
 func get_range_level() -> int:                 return int(range_level)
 func get_current_acquire_range() -> float:     return float(_current_acquire_range)
+
+# =========================================================
+# Binding helpers (path-agnostic)
+# =========================================================
+func _bind_nodes_if_missing() -> void:
+	if DetectionArea == null:
+		DetectionArea = _try_node(["DetectionArea"]) as Area3D
+	if ClickBody == null:
+		ClickBody = _try_node(["StaticBody3D", "ClickBody"]) as StaticBody3D
+	if Turret == null:
+		Turret = _try_node([
+			"tower_model/Turret",
+			"sniper_tower_model/TurretPivot", # if you add a pivot
+			"sniper_tower_model/Turret",
+			"TurretPivot",
+			"Turret"
+		]) as Node3D
+	if MuzzlePoint == null:
+		MuzzlePoint = _try_node([
+			"tower_model/Turret/Barrel/MuzzlePoint",
+			"sniper_tower_model/Turret/Barrel/MuzzlePoint",
+			"sniper_tower_model/TurretPivot/TurretModel/Barrel/MuzzlePoint",
+			"MuzzlePoint"
+		]) as Node3D
+
+func _try_node(paths: Array) -> Node:
+	for p in paths:
+		var n := get_node_or_null(p)
+		if n != null: return n
+	# fallback: recursive search by the last element name if unique
+	for p in paths:
+		var name := String(p).get_file()   # after last '/'
+		if name == "": name = String(p)
+		var n2 := find_child(name, true, false)
+		if n2 != null: return n2
+	return null

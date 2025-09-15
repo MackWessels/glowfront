@@ -170,6 +170,12 @@ layout_mode = 2
 text = "Turret"
 script = ExtResource("8_85g3d")
 
+[node name="SniperButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
+layout_mode = 2
+text = "Sniper"
+script = ExtResource("8_85g3d")
+action_name = "sniper"
+
 [node name="TeslaButton" type="Button" parent="BuildUI/HUDRoot/Toolbar"]
 layout_mode = 2
 text = "Tesla"
