@@ -1,5 +1,5 @@
 res://scenes/main.tscn
-res://scripts/enemy_spawner.gd
+res://shaders/space_sky.gdshader
 res://scenes/tile_board.tscn
 res://scenes/tile.tscn
 res://scenes/enemy_spawner.tscn
