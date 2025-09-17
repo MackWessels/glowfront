@@ -8,7 +8,7 @@ class_name EnemySpawner
 # ----- Carrier config (all passed at spawn time) -----
 @export var carrier_scene: PackedScene                 # e.g. res://scenes/enemy_carrier.tscn
 @export var spawn_carriers: bool = true
-@export_range(0.0, 1.0, 0.001) var carrier_chance: float = 0.1
+@export_range(0.0, 1.0, 0.001) var carrier_chance: float = 0.10
 
 # Defaults pushed into the carrier instance at spawn:
 @export var carrier_hover_offset: float = 0.6
@@ -20,10 +20,10 @@ class_name EnemySpawner
 @export var carrier_search_radius_tiles: int = 2
 @export var carrier_landing_time: float = 0.20
 
-# pacing
+# pacing (slowed down a bit)
 @export var auto_start: bool = true
-@export var spawn_interval: float = 0.25
-@export var burst_count: int = 4
+@export var spawn_interval: float = 0.35
+@export var burst_count: int = 3
 @export var max_alive: int = 250
 
 # placement / jitter
@@ -37,19 +37,24 @@ class_name EnemySpawner
 
 # ---------------- Waves ----------------
 @export var wave_index: int = 1
-@export var wave_time_sec: float = 5.0
+@export var wave_time_sec: float = 12.0           # longer waves
 @export var wave_cooldown_sec: float = 3.0
-@export var base_wave_count: int = 10
-@export var per_wave_count: int = 2
-@export var wave_frontload_frac: float = 0.30
+@export var base_wave_count: int = 8              # fewer enemies at start
+@export var per_wave_count: int = 1               # gentler increase
+@export var wave_frontload_frac: float = 0.15     # fewer front-loaded
+
+# Setup pause before the very first wave
+@export var start_setup_delay_sec: float = 3.0
 
 # ---------------- Levels (HP only) ----------------
+# Base HP per level (unchanged), but scale per wave more gently
 @export var lvl1_base_hp: int = 3
 @export var lvl2_base_hp: int = 7
 @export var lvl3_base_hp: int = 14
 @export var lvl4_base_hp: int = 22
-@export var hp_per_wave_pct: float = 0.22
+@export var hp_per_wave_pct: float = 0.10         # was 0.22
 
+# (Weights no longer used; kept for inspector compatibility)
 @export var lvl1_w_start: float = 70.0
 @export var lvl2_w_start: float = 20.0
 @export var lvl3_w_start: float = 9.0
@@ -59,8 +64,8 @@ class_name EnemySpawner
 @export var lvl4_w_per_wave: float = 0.15
 
 # ---------------- Speed control (ONLY 'speed') ----------------
-@export var base_speed: float = 2.0
-@export var speed_per_wave_pct: float = 0.08
+@export var base_speed: float = 1.6               # was 2.0
+@export var speed_per_wave_pct: float = 0.04      # was 0.08
 @export var lvl2_speed_mult: float = 1.05
 @export var lvl3_speed_mult: float = 1.12
 @export var lvl4_speed_mult: float = 1.20
@@ -75,17 +80,17 @@ class_name EnemySpawner
 var _board: Node = null
 var _timer: Timer
 var _phase_timer: Timer
-var _phase: String = "idle"          # "spawning" | "cooldown" | "idle"
+var _phase: String = "idle"          # "setup" | "spawning" | "cooldown" | "idle"
 var _paused: bool = false
 var _alive: int = 0
 var _wave_remaining: int = 0
 
 # Per-wave bookkeeping (for stipend & perfect bonus)
-var _wave_total_spawned: int = 0      # count only *spawner-made* enemies
+var _wave_total_spawned: int = 0
 var _wave_resolved: int = 0
 var _wave_leaks: int = 0
-var _wave_kill_payout: int = 0        # integer minerals granted from kills (post-bounty, pre-perfect)
-var _wave_awarded: bool = false       # ensure perfect bonus pays once
+var _wave_kill_payout: int = 0
+var _wave_awarded: bool = false
 
 # =====================================================================
 # Lifecycle
@@ -129,9 +134,17 @@ func start_spawning() -> void:
 	_timer.wait_time = maxf(0.05, spawn_interval)
 	if _timer.is_stopped():
 		_timer.start()
+
+	# Enter a one-time setup pause before the first wave
+	if _phase == "idle":
+		_phase = "setup"
+		_phase_timer.start(maxf(0.1, start_setup_delay_sec))
+		return
+
+	# Normal wave start
 	if _phase != "spawning":
 		_phase = "spawning"
-		_begin_wave()  # stipend + reset counters
+		_begin_wave()
 		_wave_remaining = _calc_wave_total()
 		_frontload_wave()
 		_phase_timer.start(maxf(0.1, wave_time_sec))
@@ -158,7 +171,14 @@ func set_rate(seconds_per_spawn: float) -> void:
 # Phase timer
 # =====================================================================
 func _on_phase_timer() -> void:
-	if _phase == "spawning":
+	if _phase == "setup":
+		# After setup pause, begin the first wave
+		_phase = "spawning"
+		_begin_wave()
+		_wave_remaining = _calc_wave_total()
+		_frontload_wave()
+		_phase_timer.start(maxf(0.1, wave_time_sec))
+	elif _phase == "spawning":
 		_phase = "cooldown"
 		_phase_timer.start(maxf(0.1, wave_cooldown_sec))
 	elif _phase == "cooldown":
@@ -227,7 +247,8 @@ func _spawn_one() -> void:
 	# choose scene: carrier vs basic
 	var use_carrier: bool = false
 	var scene_to_spawn: PackedScene = enemy_scene
-	if spawn_carriers and carrier_scene != null and randf() < carrier_chance:
+	# carriers only start at wave 20+
+	if spawn_carriers and carrier_scene != null and wave_index >= 20 and randf() < carrier_chance:
 		use_carrier = true
 		scene_to_spawn = carrier_scene
 
@@ -286,32 +307,26 @@ func _spawn_one() -> void:
 # Carrier helpers
 # =====================================================================
 
-# Utility: does this object expose a property named `name`?
 func _has_prop(o: Object, name: String) -> bool:
 	for p in o.get_property_list():
 		if typeof(p) == TYPE_DICTIONARY and p.has("name") and p["name"] == name:
 			return true
 	return false
 
-# Configure a carrier instance entirely via properties/methods
 func _prime_carrier(inst: Node, spawn_pos: Vector3, tile_w: float) -> void:
-	# give it the basic minion scene to drop
 	if enemy_scene != null and _has_prop(inst, "minion_scene"):
 		inst.set("minion_scene", enemy_scene)
 
-	# pass spawner + board refs in the way the carrier expects
 	if inst.has_method("set_spawner"):
 		inst.call("set_spawner", self)
 	elif _has_prop(inst, "spawner_path"):
 		inst.set("spawner_path", get_path())
 
-	# world/tile params
 	if _has_prop(inst, "tile_size"):
 		inst.set("tile_size", tile_w)
 	if _has_prop(inst, "ground_y"):
 		inst.set("ground_y", spawn_pos.y)
 
-	# tune carrier behavior (these are the exports you set on the spawner)
 	if _has_prop(inst, "hover_offset"):
 		inst.set("hover_offset", carrier_hover_offset)
 	if _has_prop(inst, "drop_every_tiles"):
@@ -332,9 +347,6 @@ func _prime_carrier(inst: Node, spawn_pos: Vector3, tile_w: float) -> void:
 # =====================================================================
 # Carrier/child spawn hook  ← used by CarrierEnemy
 # =====================================================================
-# Called by special enemies (e.g., carriers) to spawn mid-wave children.
-# - counts_toward_cap: if true, respects max_alive and increments _alive.
-# - tags: stored on the child (e.g., ["carrier"]) for bookkeeping like leaks.
 func request_child_spawn(
 		scene: PackedScene,
 		xform: Transform3D,
@@ -360,7 +372,6 @@ func request_child_spawn(
 	if inst.has_signal("died"):
 		inst.died.connect(_on_enemy_died)
 
-	# Level + stats
 	var lvl: int = _pick_level_for_wave(wave_index)
 	if inst.has_method("set_level"):
 		inst.call("set_level", lvl)
@@ -376,8 +387,7 @@ func request_child_spawn(
 
 	var inst3 := inst as Node3D
 	if inst3 != null:
-		inst3.global_transform = xform   # IMPORTANT: global, not local
-		# Do NOT lock_y_to() here; the carrier will tween then lock.
+		inst3.global_transform = xform
 
 	if counts_toward_cap:
 		_alive += 1
@@ -387,8 +397,6 @@ func request_child_spawn(
 
 	return inst
 
-
-
 # =====================================================================
 # Callbacks
 # =====================================================================
@@ -397,7 +405,6 @@ func _on_enemy_died() -> void:
 	_wave_resolved += 1
 	_maybe_award_wave_end()
 
-# Called by Enemy when it reaches the goal (carrier children can be ignored)
 func notify_leak(enemy: Node = null) -> void:
 	var count_this_leak: bool = true
 	if enemy != null:
@@ -416,7 +423,6 @@ func notify_leak(enemy: Node = null) -> void:
 			print("[Wave] leak ignored (carrier-child).")
 	_maybe_award_wave_end()
 
-# Called by Enemy after it awarded bounty to Economy.
 func notify_kill_payout(amount: int) -> void:
 	if amount > 0:
 		_wave_kill_payout += amount
@@ -429,8 +435,6 @@ func notify_kill_payout(amount: int) -> void:
 func _maybe_award_wave_end() -> void:
 	if _wave_awarded:
 		return
-	# Consider a wave "fully resolved" once we've spawned everyone
-	# AND every spawned enemy is either killed or leaked.
 	var spawned_all: bool = (_wave_remaining <= 0 and _phase != "spawning")
 	var resolved_all: bool = (_wave_resolved >= _wave_total_spawned)
 	if not (spawned_all and resolved_all):
@@ -498,20 +502,27 @@ func _pick_random_on_span(exits: Array, lat: Vector3) -> Vector3:
 func _calc_wave_total() -> int:
 	return int(base_wave_count + per_wave_count * max(0, wave_index - 1))
 
+# Level unlocks + gentle odds:
+# - waves 1–4: only L1
+# - waves 5–24: mostly L1, sometimes L2
+# - waves 25–34: mostly L1/L2, occasional L3
+# - waves 35+: add L4 rarely
 func _pick_level_for_wave(wave: int) -> int:
-	var w1: float = maxf(0.0, lvl1_w_start - (lvl2_w_per_wave + lvl3_w_per_wave + lvl4_w_per_wave) * float(max(0, wave - 1)))
-	var w2: float = lvl2_w_start + lvl2_w_per_wave * float(max(0, wave - 1))
-	var w3: float = lvl3_w_start + lvl3_w_per_wave * float(max(0, wave - 1))
-	var w4: float = lvl4_w_start + lvl4_w_per_wave * float(max(0, wave - 1))
-	var s: float = max(0.0001, w1 + w2 + w3 + w4)
-	w1 /= s; w2 /= s; w3 /= s; w4 /= s
-	var r: float = randf()
-	if r < w1: return 1
-	r -= w1
-	if r < w2: return 2
-	r -= w2
-	if r < w3: return 3
-	return 4
+	if wave < 5:
+		return 1
+	elif wave < 25:
+		return (2 if randf() < 0.20 else 1)
+	elif wave < 35:
+		var r := randf()
+		if r < 0.60: return 1
+		elif r < 0.85: return 2
+		else: return 3
+	else:
+		var r2 := randf()
+		if r2 < 0.50: return 1
+		elif r2 < 0.80: return 2
+		elif r2 < 0.85: return 4
+		else: return 3
 
 func _compute_stats_for_level_and_wave(level: int, wave: int) -> Dictionary:
 	# --- HP ---
