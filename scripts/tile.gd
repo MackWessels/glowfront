@@ -2,19 +2,18 @@ extends StaticBody3D
 
 # Scenes / UI
 @export var turret_scene: PackedScene
-@export var sniper_scene: PackedScene        # 1×1 sniper tower (NEW)
-
+@export var sniper_scene: PackedScene        # 1×1 sniper tower
 @export var wall_scene: PackedScene
 @export var mortar_scene: PackedScene        # 2×2 mortar
 @export var miner_scene: PackedScene         # 1×1 mineral generator
 @export var tesla_scene: PackedScene
-@export var shard_miner_scene: PackedScene   # 2×2 shard miner (NEW)
+@export var shard_miner_scene: PackedScene   # 2×2 shard miner
 @export var placement_menu: PopupMenu
 
 @onready var _tile_mesh: MeshInstance3D = $"TileMesh"
 var _orig_mat: Material = null
 
-# Hover highlight
+# ---------- Hover highlight ----------
 const PENDING_COLOR := Color(0.25, 0.55, 1.0)
 var _pending_mat: StandardMaterial3D
 var _pending_saved_mat: Material
@@ -39,7 +38,7 @@ func set_pending_blue(on: bool) -> void:
 		_pending_saved_mat = null
 		_pending_on = false
 
-# Grid / state
+# ---------- Grid / state ----------
 var grid_x := 0
 var grid_z := 0
 var grid_position: Vector2i:
@@ -58,8 +57,21 @@ var placed_object: Node
 # 2×2 footprint support
 const FP_NONE := Vector2i(-1, -1)
 const MORTAR_FOOT := Vector2i(2, 2)               # (x, z)
-const SHARD_MINER_FOOT := Vector2i(2, 2)          # (x, z) (NEW)
+const SHARD_MINER_FOOT := Vector2i(2, 2)          # (x, z)
 var occupied_by_anchor: Vector2i = FP_NONE        # != FP_NONE if claimed by any 2×2
+
+# ---------- Hatch animation (exported tunables) ----------
+@export var hatch_axis_is_x: bool = true      # true = shrink along X, false = along Z
+@export var hatch_edge_dir: int = 1           # +1 = open toward +axis edge, -1 = toward -axis
+@export_range(0.0, 1.0, 0.01) var hatch_open_scale: float = 0.02
+@export var hatch_open_time: float = 0.15
+@export var hatch_pause_time: float = 0.05
+@export var hatch_close_time: float = 0.15
+@export var raise_height: float = 1.0         # how far below the tile the turret starts
+@export var raise_time: float = 0.18
+@export var tween_trans: int = Tween.TRANS_SINE
+@export var tween_ease_out: int = Tween.EASE_OUT
+@export var tween_ease_in: int = Tween.EASE_IN
 
 func _ready() -> void:
 	if is_instance_valid(_tile_mesh) and _orig_mat == null:
@@ -77,7 +89,6 @@ func _input_event(_cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _sh
 				placement_menu.add_item("Place Turret", 0)
 				if tesla_scene != null:
 					placement_menu.add_item("Place Tesla Tower", 5)
-				# NEW: sniper 1×1
 				if sniper_scene != null:
 					placement_menu.add_item("Place Sniper Tower", 7)
 				placement_menu.add_item("Place Wall", 1)
@@ -91,8 +102,108 @@ func _input_event(_cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _sh
 				placement_menu.position = get_viewport().get_mouse_position()
 				placement_menu.popup()
 
+# ========================================================
+# Animation helpers
+# ========================================================
+func _tile_step() -> float:
+	var step := 1.0
+	if tile_board:
+		if tile_board.has_method("tile_world_size"):
+			step = float(tile_board.call("tile_world_size"))
+		elif tile_board.has("tile_size"):
+			step = float(tile_board.get("tile_size"))
+	return step
 
-# ---------- 1×1 placements ----------
+# Plays: hatch open -> raise child -> hatch close
+func _animate_hatch_and_raise(child: Node3D) -> void:
+	if not is_instance_valid(_tile_mesh):
+		return
+
+	# --- disarm while animating ---
+	_set_tower_armed(child, false)
+
+	# Cache start transforms
+	var mesh_start_scale: Vector3 = _tile_mesh.scale
+	var mesh_start_pos: Vector3 = _tile_mesh.position
+
+	# Compute “open” target scale
+	var open_scale := mesh_start_scale
+	if hatch_axis_is_x:
+		open_scale.x = mesh_start_scale.x * max(hatch_open_scale, 0.001)
+	else:
+		open_scale.z = mesh_start_scale.z * max(hatch_open_scale, 0.001)
+
+	# Shift the mesh toward the chosen edge as it shrinks so one edge stays put
+	var step := _tile_step()
+	var shrink_ratio := (open_scale.x / mesh_start_scale.x) if hatch_axis_is_x else (open_scale.z / mesh_start_scale.z)
+	var offset_mag := 0.5 * step * (1.0 - shrink_ratio)
+
+	var open_pos := mesh_start_pos
+	if hatch_axis_is_x:
+		open_pos.x += float(hatch_edge_dir) * offset_mag
+	else:
+		open_pos.z += float(hatch_edge_dir) * offset_mag
+
+	# Prepare child to rise
+	var child_start := child.position
+	child.position = child_start + Vector3(0.0, -abs(raise_height), 0.0)
+
+	# Open hatch
+	var tw := create_tween()
+	tw.set_trans(tween_trans).set_ease(tween_ease_out)
+	tw.tween_property(_tile_mesh, "scale", open_scale, hatch_open_time)
+	tw.parallel().tween_property(_tile_mesh, "position", open_pos, hatch_open_time)
+	await tw.finished
+	if not is_instance_valid(child) or not is_instance_valid(_tile_mesh): return
+
+	# Raise tower
+	var tw2 := create_tween()
+	tw2.set_trans(tween_trans).set_ease(tween_ease_out)
+	tw2.tween_property(child, "position:y", child_start.y, raise_time)
+	if hatch_pause_time > 0.0:
+		tw2.tween_interval(hatch_pause_time)
+	await tw2.finished
+	if not is_instance_valid(_tile_mesh): return
+
+	# Close hatch
+	var tw3 := create_tween()
+	tw3.set_trans(tween_trans).set_ease(tween_ease_in)
+	tw3.tween_property(_tile_mesh, "scale", mesh_start_scale, hatch_close_time)
+	tw3.parallel().tween_property(_tile_mesh, "position", mesh_start_pos, hatch_close_time)
+	await tw3.finished
+
+	# --- arm after it’s up and closed ---
+	if is_instance_valid(child):
+		_set_tower_armed(child, true)
+
+
+# Helper: enable/disable a tower's ability to shoot/detect
+func _set_tower_armed(t: Node, armed: bool) -> void:
+	if t == null: return
+	# Prefer explicit APIs if your tower exposes them
+	if t.has_method("set_shoot_enabled"): t.call("set_shoot_enabled", armed); return
+	if t.has_method("set_combat_enabled"): t.call("set_combat_enabled", armed); return
+	if t.has_method("set_enabled"): t.call("set_enabled", armed); return
+
+	# Common nodes by name
+	var da := t.get_node_or_null("DetectionArea")
+	if da is Area3D:
+		(da as Area3D).monitoring = armed
+
+	var fire_timer := t.get_node_or_null("FireTimer")
+	if fire_timer is Timer:
+		if armed: (fire_timer as Timer).start()
+		else: (fire_timer as Timer).stop()
+
+	# Generic fallbacks
+	t.set_process(armed)
+	t.set_physics_process(armed)
+	t.set("shoot_enabled", armed) # harmless if unused
+
+
+# ========================================================
+# 1×1 placements (with hatch animation)
+# ========================================================
 func place_turret() -> void:
 	if is_broken or turret_scene == null: return
 	_clear_existing_object()
@@ -105,6 +216,8 @@ func place_turret() -> void:
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
+	if t is Node3D:
+		_animate_hatch_and_raise(t)
 
 func place_wall() -> void:
 	if is_broken or wall_scene == null: return
@@ -117,6 +230,8 @@ func place_wall() -> void:
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
+	# Walls do not rise through a hatch (feels instant/solid). Add if desired:
+	# if w is Node3D: _animate_hatch_and_raise(w)
 
 func place_miner() -> void:
 	if is_broken or miner_scene == null: return
@@ -132,6 +247,8 @@ func place_miner() -> void:
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
+	if m is Node3D:
+		_animate_hatch_and_raise(m)
 
 func place_tesla() -> void:
 	if is_broken or tesla_scene == null: return
@@ -147,6 +264,8 @@ func place_tesla() -> void:
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
+	if t is Node3D:
+		_animate_hatch_and_raise(t)
 
 func place_sniper() -> void:
 	if is_broken or sniper_scene == null: return
@@ -160,11 +279,14 @@ func place_sniper() -> void:
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
-	# proactively notify board (keeps pathing correct even if base tower code changes)
+	if s is Node3D:
+		_animate_hatch_and_raise(s)
+	# keep pathing correct even if base code changes later
 	_recompute_after_block(grid_position, Vector2i(1, 1))
 
-
-# ---------- 2×2 mortar placement ----------
+# ========================================================
+# 2×2 placements (no hatch by default; anchor-only hatch would be odd)
+# ========================================================
 func place_mortar() -> void:
 	if is_broken or mortar_scene == null: return
 	var board := tile_board
@@ -207,9 +329,7 @@ func place_mortar() -> void:
 	var mortar := mortar_scene.instantiate()
 	add_child(mortar)
 	if mortar is Node3D:
-		var step := 0.0
-		if board.has_method("tile_world_size"): step = float(board.call("tile_world_size"))
-		elif board.has("tile_size"):            step = float(board.get("tile_size"))
+		var step := _tile_step()
 		if step > 0.0:
 			(mortar as Node3D).global_position = global_position + Vector3(step * 0.5, 0.0, step * 0.5)
 		else:
@@ -222,7 +342,6 @@ func place_mortar() -> void:
 	is_broken = false
 	occupied_by_anchor = anchor
 
-# ---------- 2×2 shard_miner placement (NEW) ----------
 func place_shard_miner() -> void:
 	if is_broken or shard_miner_scene == null: return
 	var board := tile_board
@@ -265,9 +384,7 @@ func place_shard_miner() -> void:
 	var sm := shard_miner_scene.instantiate()
 	add_child(sm)
 	if sm is Node3D:
-		var step := 0.0
-		if board.has_method("tile_world_size"): step = float(board.call("tile_world_size"))
-		elif board.has("tile_size"):            step = float(board.get("tile_size"))
+		var step := _tile_step()
 		if step > 0.0:
 			(sm as Node3D).global_position = global_position + Vector3(step * 0.5, 0.0, step * 0.5)
 		else:
@@ -283,24 +400,18 @@ func place_shard_miner() -> void:
 	blocked = true
 	is_broken = false
 	occupied_by_anchor = anchor
-
-	# tell the board the walkability changed
 	_recompute_after_block(anchor, SHARD_MINER_FOOT)
 
+# ---------- Board recompute ----------
 func _recompute_after_block(anchor: Vector2i, size: Vector2i) -> void:
 	if tile_board == null: return
-	# Prefer explicit APIs if your TileBoard exposes them:
 	if tile_board.has_method("on_tiles_blocked_changed"):
-		tile_board.call("on_tiles_blocked_changed", anchor, size, true)
-		return
+		tile_board.call("on_tiles_blocked_changed", anchor, size, true); return
 	if tile_board.has_method("notify_blocked_rect"):
-		tile_board.call("notify_blocked_rect", anchor, size, true)
-		return
-	# Fallbacks: try common recompute names; only the first that exists is called.
+		tile_board.call("notify_blocked_rect", anchor, size, true); return
 	for m in ["recompute_flow", "recompute_paths", "rebuild_flow_field", "recompute_board_dirs", "recompute"]:
 		if tile_board.has_method(m):
-			tile_board.call(m)
-			return
+			tile_board.call(m); return
 
 # ---------- Queries / actions ----------
 func set_wall(v: bool) -> void:
@@ -314,13 +425,12 @@ func apply_placement(action: String) -> void:
 	match action:
 		"turret":      place_turret()
 		"tesla":       place_tesla()
-		"sniper":      place_sniper()       # NEW
+		"sniper":      place_sniper()
 		"wall":        place_wall()
 		"mortar":      place_mortar()
 		"miner":       place_miner()
 		"shard_miner": place_shard_miner()
 		"repair":      repair_tile()
-
 
 func break_tile() -> void:
 	blocked = false
