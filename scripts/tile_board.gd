@@ -14,6 +14,11 @@ extends Node3D
 # Costs
 @export var turret_cost: int = 10
 @export var mortar_cost: int = 20
+@export var wall_cost: int = 5
+@export var miner_cost: int = 10
+@export var tesla_cost: int = 10
+@export var shard_miner_cost: int = 20
+@export var sniper_cost: int = 16
 
 # Bounds & pens
 @export var use_bounds: bool = true
@@ -52,53 +57,79 @@ var _pending_hover_cells: Array[Vector2i] = []  # cells currently blue because o
 @export var anchor_spawner_offboard: bool = true
 @export var offboard_distance_tiles: float = 1.0
 
-# --------- ReflectionProbe / Environment (board-owned) ----------
-@export var use_reflection_probe: bool = true
-@export var probe_height: float = 8.0            # world-height of capture box
-@export var probe_margin_tiles: float = 1.0      # extra capture margin in tiles
+# ---------- Environment / Probe / Lighting ----------
+const WORLDENV_NAME := "WorldEnvironmentAuto"
+const REFLECTION_PROBE_NAME := "BoardReflectionProbe"
+const KEY_LIGHT_NAME := "KeyLight"
+const FILL_LIGHT_NAME := "CameraFill"     # camera-follow omni (disabled by default)
+const CORNER_RIG_NAME := "CornerRig"
+const CENTER_BOUNCE_NAME := "CenterBounce"
+const RIM_LIGHT_NAME := "RimLight"
+const FILL_SUN_NAME := "FillSun"
 
-# --------- Ambient / Sky lift (to avoid far-side darkness) -------
-@export var ambient_energy: float = 0.18         # 0..2
-@export var ambient_sky_contrib: float = 0.7     # 0..1
-@export var sky_energy: float = 1.1
-@export var sky_horizon: Color = Color(0.12, 0.14, 0.18)
-@export var sky_ground: Color = Color(0.10, 0.11, 0.13)
+# Environment tuning (BRIGHTER defaults, but not blown out)
+@export var ambient_energy: float = 0.55
+@export_range(0.0, 1.0, 0.01) var ambient_sky_contrib: float = 1.0
+@export var sky_energy: float = 1.6
+@export var sky_horizon: Color = Color(0.15, 0.18, 0.22)
+@export var sky_ground: Color  = Color(0.08, 0.09, 0.12)
 
-# --------- Key light (board-owned) ----------
-@export var use_key_light: bool = true
-# 0 = Directional, 1 = Omni, 2 = Spot
-@export_enum("Directional","Omni","Spot") var key_light_type: int = 0
-@export var key_light_color: Color = Color(1, 1, 1)
-@export var key_light_energy: float = 1.0
-@export var key_light_height: float = 12.0
-@export var key_light_range_tiles: float = 1.2
-@export var key_light_spot_angle_deg: float = 55.0
+# Global exposure lift (implemented via brightness multiplier)
+@export var exposure_enabled: bool = true
+@export var exposure_ev: float = 1.4   # EV ~ +1.4 => ~2.64× brightness
+
+# Optional SDFGI bounce
+@export var use_sdfgi: bool = true
+@export var sdfgi_energy: float = 2.0
+@export var sdfgi_bounce_feedback: float = 0.95
+@export var sdfgi_min_cell_size: float = 0.5
+
+# Reflection probe sizing
+@export var probe_margin_tiles: float = 2.0
+@export var probe_height: float = 3.0
+
+# ------------ Key Sun ------------
+@export var single_sun_mode: bool = true  # we still create a key sun
+# Energy supports both unit systems:
+@export var key_energy_lux: float = 130_000.0  # PLU on (lux)
+@export var key_energy_legacy: float = 7.0     # PLU off
+@export var key_angle_deg: float = 85.0        # high-angle for evenness
+@export var key_azimuth_deg: float = 45.0      # diagonal across the board
+
+# ------------ Dual-Sun Fill (opposite directional, no shadows) ------------
+@export var dual_sun_mode: bool = true              # add a fill sun opposite the key
+@export var fill_sun_ratio: float = 0.45            # fill energy as fraction of key
+@export var fill_sun_angle_deg: float = 82.0        # slightly overhead
+@export var fill_sun_azimuth_offset_deg: float = 180.0  # opposite the key
+
+# Camera-follow fill (OPTIONAL; disabled by default by setting energies to 0)
+@export var fill_energy_lm: float = 0.0             # PLU on  (0 disables node)
+@export var fill_energy_legacy: float = 0.0         # PLU off (0 disables node)
+@export var fill_height: float = 2.0
+@export var fill_specular: float = 0.15
+
+# Extras
+@export var use_corner_spots: bool = false
+@export var spot_energy_lm: float = 52000.0
+@export var spot_energy_legacy: float = 4.0
+@export var spot_height: float = 8.0
+@export var spot_cone_deg: float = 65.0
+@export var spot_shadow: bool = true
+@export var spot_soft_shadow: float = 1.0
+
+@export var use_center_bounce: bool = false
+@export var center_bounce_energy_lm: float = 30000.0
+@export var center_bounce_energy_legacy: float = 5.0
+@export var center_bounce_specular: float = 0.10
+
+@export var use_rim_light: bool = false
+@export var rim_energy: float = 0.7
+@export var rim_angle_deg: float = 20.0
+@export var rim_azimuth_deg: float = -150.0
 
 # Groups / polling
 const ENEMY_GROUP: String = "enemy"
 const PENDING_POLL_HZ := 6.0
-
-# --- additional costs ---
-@export var wall_cost: int = 5
-@export var miner_cost: int = 10
-@export var tesla_cost: int = 10
-@export var shard_miner_cost: int = 20
-@export var sniper_cost: int = 16
-
-# --- public helper for UI ---
-func get_action_cost(action: String) -> int:
-	return _power_cost_for(action)
-
-func _cost_for_action(action: String) -> int:
-	match action:
-		"turret":       return turret_cost
-		"mortar":       return mortar_cost
-		"wall":         return wall_cost
-		"miner":        return miner_cost
-		"tesla":        return tesla_cost
-		"shard_miner":  return (shard_miner_cost if shard_miner_cost >= 0 else mortar_cost)
-		"sniper":       return (sniper_cost if sniper_cost >= 0 else turret_cost)
-		_:              return 0
 
 # ---------------- Signals ----------------
 signal global_path_changed
@@ -127,10 +158,20 @@ const ORTHO_DIRS: Array[Vector2i] = [
 ]
 const EPS := 0.0001
 
-# --- Node names ---
-const PROBE_NAME := "BoardReflectionProbe"
-const WORLDENV_NAME := "WorldEnvironment"
-const LIGHT_NAME := "BoardKeyLight"
+# ---------------- Public helpers for UI ----------------
+func get_action_cost(action: String) -> int:
+	return _power_cost_for(action)
+
+func _cost_for_action(action: String) -> int:
+	match action:
+		"turret":       return turret_cost
+		"mortar":       return mortar_cost
+		"wall":         return wall_cost
+		"miner":        return miner_cost
+		"tesla":        return tesla_cost
+		"shard_miner":  return (shard_miner_cost if shard_miner_cost >= 0 else mortar_cost)
+		"sniper":       return (sniper_cost if sniper_cost >= 0 else turret_cost)
+		_:              return 0
 
 # ---------------- Lifecycle ----------------
 func _ready() -> void:
@@ -149,9 +190,20 @@ func _ready() -> void:
 	if use_bounds:
 		_create_bounds()
 
-	# Fit probe + key light once the board is built
-	_fit_reflection_probe(board_size_x, board_size_z, _step)
-	_fit_key_light(board_size_x, board_size_z, _step)
+	# Visual setup (env, probe, lights)
+	_ensure_world_environment()
+	_fit_reflection_probe()
+	_ensure_key_light()
+	if dual_sun_mode:
+		_ensure_fill_sun()
+	_ensure_camera_fill()  # will delete itself when energies are 0
+
+	if not single_sun_mode and use_corner_spots:
+		_ensure_corner_spots()
+	if use_center_bounce:
+		_ensure_center_bounce()
+	if use_rim_light:
+		_ensure_rim_light()
 
 	_recompute_flow()
 	_emit_path_changed()
@@ -162,6 +214,9 @@ func _ready() -> void:
 	call_deferred("_connect_powerups")
 
 func _physics_process(delta: float) -> void:
+	# keep the (optional) small fill following the camera
+	_ensure_camera_fill()
+
 	if _pending_builds.size() > 0:
 		_poll_accum += delta
 		var interval := 1.0 / PENDING_POLL_HZ
@@ -172,9 +227,7 @@ func _physics_process(delta: float) -> void:
 func rebuild_bounds() -> void:
 	if use_bounds:
 		_create_bounds()
-	# keep visuals aligned
-	_fit_reflection_probe(board_size_x, board_size_z, _step)
-	_fit_key_light(board_size_x, board_size_z, _step)
+	_after_board_resized()
 
 # ---------------- PowerUps hookup ----------------
 func _connect_powerups() -> void:
@@ -198,18 +251,14 @@ func is_in_bounds(c: Vector2i) -> bool: return _in_bounds(c)
 # ---------------- Pending/highlight ----------------
 func set_active_tile(tile: Node, armed_action: String = "") -> void:
 	_clear_pending_hover()
-
 	if tile and is_instance_valid(tile):
 		_pending_tile = tile
 		active_tile = tile
-
 		var size := Vector2i(1, 1)
 		if armed_action == "mortar" or armed_action == "shard_miner":
 			size = Vector2i(2, 2)
-
 		var anchor: Vector2i = tile.get("grid_position")
 		var cells := _footprint_cells_for(anchor, size)
-
 		for c in cells:
 			var t: Node = tiles.get(c, null)
 			if t and t.has_method("set_pending_blue"):
@@ -276,8 +325,8 @@ func generate_board() -> void:
 		push_error("TileBoard: 'tile_scene' not set.")
 		return
 	tiles.clear()
-	for x in board_size_x:
-		for z in board_size_z:
+	for x in range(board_size_x):
+		for z in range(board_size_z):
 			var tile := tile_scene.instantiate() as Node3D
 			add_child(tile)
 			var pos := Vector2i(x, z)
@@ -313,7 +362,7 @@ func cell_to_world(pos: Vector2i) -> Vector3:
 func world_to_cell(world_pos: Vector3) -> Vector2i:
 	var gx: int = roundi((world_pos.x - _grid_origin.x) / _step)
 	var gz: int = roundi((world_pos.z - _grid_origin.z) / _step)
-	return Vector2i(clamp(gx, 0, board_size_x - 1), clamp(gz, 0, board_size_z - 1))
+	return Vector2i(clampi(gx, 0, board_size_x - 1), clampi(gz, 0, board_size_z - 1))
 
 func _goal_cell() -> Vector2i: return world_to_cell(goal_node.global_position)
 func _grid_bounds() -> Rect2i: return Rect2i(Vector2i(0, 0), Vector2i(board_size_x, board_size_z))
@@ -509,26 +558,21 @@ func _tile_is_walkable(cell: Vector2i) -> bool:
 	if not tiles.has(cell): return false
 	var t: Node = tiles.get(cell, null)
 
-	# Explicit per-tile override
 	if t and t.has_method("is_walkable"):
 		return bool(t.call("is_walkable"))
 
-	# Optional boolean property
 	var v: Variant = t.get("walkable")
 	if typeof(v) == TYPE_BOOL:
 		return bool(v)
 
-	# Generic occupancy hooks
 	if t and t.has_method("has_structure"):
 		return not bool(t.call("has_structure"))
 	if t and t.has_method("has_turret"):
 		return not bool(t.call("has_turret"))
 
-	# Any descendant in "building" blocks
 	if _node_or_desc_has_group(t, "building"):
 		return false
 
-	# Legacy fallback: child named "Tower"
 	var tower: Node = t.find_child("Tower", true, false)
 	return tower == null
 
@@ -705,168 +749,103 @@ func _on_place_selected(action: String) -> void:
 	if active_tile == null or not is_instance_valid(active_tile): return
 	if action == "": return
 
-	# ---------------- Mortar (2×2 footprint) ----------------
+	# 2×2 mortar
 	if action == "mortar":
 		var anchor: Vector2i = active_tile.get("grid_position")
 		var cells := _footprint_cells_for(anchor, Vector2i(2, 2))
 		var action_cost := _power_cost_for("mortar")
-
-		if action_cost > 0 and not _econ_can_afford(action_cost):
-			return
-
+		if action_cost > 0 and not _econ_can_afford(action_cost): return
 		for c in cells:
 			if _is_in_spawn_opening(c, spawner_span):
-				_clear_pending()
-				return
-
+				_clear_pending(); return
 		for c2 in cells:
 			if not _tile_is_walkable(c2):
-				_clear_pending()
-				return
-
-		var ok_path := _path_ok_if_blocked(cells)
-		if not ok_path:
-			_clear_pending()
-			return
-
+				_clear_pending(); return
+		if not _path_ok_if_blocked(cells):
+			_clear_pending(); return
 		var any_enemies := false
 		for c3 in cells:
 			if _enemies_on_cell(c3).size() > 0:
-				any_enemies = true
-				break
-
+				any_enemies = true; break
 		if any_enemies:
 			for c4 in cells:
 				var t4: Node = tiles.get(c4, null)
 				if t4 and t4.has_method("set_pending_blue"): t4.call("set_pending_blue", true)
 				_reserved_cells[c4] = true
 			_recompute_flow()
-			_pending_builds.append({
-				"cell": anchor,
-				"cells": cells,
-				"tile": active_tile,
-				"action": "mortar",
-				"cost": action_cost
-			})
+			_pending_builds.append({"cell": anchor, "cells": cells, "tile": active_tile, "action": "mortar", "cost": action_cost})
 			_poll_accum = 0.0
 			_emit_path_changed()
 			return
-
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
 		if active_tile.has_method("apply_placement"):
 			active_tile.call("apply_placement", "mortar")
-
 		var ok2 := _recompute_flow()
 		if not ok2:
 			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
-			_recompute_flow()
-			_emit_path_changed()
-			_clear_pending()
-			return
-
+			_recompute_flow(); _emit_path_changed(); _clear_pending(); return
 		var placed_ok := _placement_succeeded(active_tile, "mortar")
 		if placed_ok and action_cost > 0:
 			var paid := _econ_spend(action_cost)
 			if not paid and active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
+		_emit_path_changed(); _clear_pending(); return
 
-		_emit_path_changed()
-		_clear_pending()
-		return
-
-	# ---------------- Shard Miner (2×2 footprint) ----------------
+	# 2×2 shard miner
 	if action == "shard_miner":
 		var anchor_sm: Vector2i = active_tile.get("grid_position")
 		var cells_sm := _footprint_cells_for(anchor_sm, Vector2i(2, 2))
 		var action_cost_sm := _power_cost_for("shard_miner")
-
-		if action_cost_sm > 0 and not _econ_can_afford(action_cost_sm):
-			return
-
+		if action_cost_sm > 0 and not _econ_can_afford(action_cost_sm): return
 		for csm in cells_sm:
 			if _is_in_spawn_opening(csm, spawner_span):
-				_clear_pending()
-				return
-
+				_clear_pending(); return
 		for csm2 in cells_sm:
 			if not _tile_is_walkable(csm2):
-				_clear_pending()
-				return
-
-		var ok_path_sm := _path_ok_if_blocked(cells_sm)
-		if not ok_path_sm:
-			_clear_pending()
-			return
-
+				_clear_pending(); return
+		if not _path_ok_if_blocked(cells_sm):
+			_clear_pending(); return
 		var any_enemies_sm := false
 		for csm3 in cells_sm:
 			if _enemies_on_cell(csm3).size() > 0:
-				any_enemies_sm = true
-				break
-
+				any_enemies_sm = true; break
 		if any_enemies_sm:
 			for csm4 in cells_sm:
 				var tsm: Node = tiles.get(csm4, null)
 				if tsm and tsm.has_method("set_pending_blue"): tsm.call("set_pending_blue", true)
 				_reserved_cells[csm4] = true
 			_recompute_flow()
-			_pending_builds.append({
-				"cell": anchor_sm,
-				"cells": cells_sm,
-				"tile": active_tile,
-				"action": "shard_miner",
-				"cost": action_cost_sm
-			})
+			_pending_builds.append({"cell": anchor_sm, "cells": cells_sm, "tile": active_tile, "action": "shard_miner", "cost": action_cost_sm})
 			_poll_accum = 0.0
 			_emit_path_changed()
 			return
-
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
 		if active_tile.has_method("apply_placement"):
 			active_tile.call("apply_placement", "shard_miner")
-
 		var ok2_sm := _recompute_flow()
 		if not ok2_sm:
 			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
-			_recompute_flow()
-			_emit_path_changed()
-			_clear_pending()
-			return
-
+			_recompute_flow(); _emit_path_changed(); _clear_pending(); return
 		var placed_ok_sm := _placement_succeeded(active_tile, "shard_miner")
 		if placed_ok_sm and action_cost_sm > 0:
 			var paid_sm := _econ_spend(action_cost_sm)
 			if not paid_sm and active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
+		_emit_path_changed(); _clear_pending(); return
 
-		_emit_path_changed()
-		_clear_pending()
-		return
-
-	# ---------------- Standard blocking (turret / wall / miner / tesla / sniper) ----------------
+	# Standard blocking (turret / wall / miner / tesla / sniper)
 	var pos: Vector2i = active_tile.get("grid_position")
 	var blocks := (action == "turret" or action == "wall" or action == "miner" or action == "tesla" or action == "sniper")
 	var action_cost2 := _power_cost_for(action)
 
-	if blocks and action_cost2 > 0 and not _econ_can_afford(action_cost2):
-		return
-
-	if blocks and _is_in_spawn_opening(pos, spawner_span):
-		_clear_pending()
-		return
-
-	if blocks and not _tile_is_walkable(pos):
-		_clear_pending()
-		return
+	if blocks and action_cost2 > 0 and not _econ_can_afford(action_cost2): return
+	if blocks and _is_in_spawn_opening(pos, spawner_span): _clear_pending(); return
+	if blocks and not _tile_is_walkable(pos): _clear_pending(); return
 
 	if blocks:
-		var ok_path2 := _path_ok_if_blocked([pos])
-		if not ok_path2:
-			_clear_pending()
-			return
-
+		if not _path_ok_if_blocked([pos]): _clear_pending(); return
 		if _enemies_on_cell(pos).size() > 0:
 			if active_tile.has_method("set_pending_blue"): active_tile.call("set_pending_blue", true)
 			_reserve_cell(pos, true)
@@ -874,31 +853,22 @@ func _on_place_selected(action: String) -> void:
 			_queue_pending_build(pos, active_tile, action, action_cost2)
 			_emit_path_changed()
 			return
-
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
 		if active_tile.has_method("apply_placement"):
 			active_tile.call("apply_placement", action)
-
 		var ok3 := _recompute_flow()
 		if not ok3:
 			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
-			_recompute_flow()
-			_emit_path_changed()
-			_clear_pending()
-			return
-
+			_recompute_flow(); _emit_path_changed(); _clear_pending(); return
 		var placed_ok2 := _placement_succeeded(active_tile, action)
 		if placed_ok2 and action_cost2 > 0:
 			var paid2 := _econ_spend(action_cost2)
 			if not paid2 and active_tile.has_method("break_tile"):
 				active_tile.call("break_tile")
+		_emit_path_changed(); _clear_pending(); return
 
-		_emit_path_changed()
-		_clear_pending()
-		return
-
-	# ---------------- Non-blocking actions ----------------
+	# Non-blocking actions
 	if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 		_pending_tile.call("set_pending_blue", false)
 	if active_tile.has_method("apply_placement"):
@@ -921,8 +891,8 @@ func _queue_pending_build(cell: Vector2i, tile: Node, action: String, cost_val: 
 
 func _footprint_cells_for(anchor: Vector2i, size: Vector2i) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	for dx in size.x:
-		for dz in size.y:
+	for dx in range(size.x):
+		for dz in range(size.y):
 			var c := Vector2i(anchor.x + dx, anchor.y + dz)
 			if _in_bounds(c): out.append(c)
 	return out
@@ -952,7 +922,7 @@ func _create_bounds() -> void:
 		if sp_side == "left": sp_edge.x = b.position.x
 		elif sp_side == "right": sp_edge.x = b.position.x + b.size.x - 1
 		elif sp_side == "top": sp_edge.y = b.position.y
-		else: sp_edge.y = b.position.y + b.size.y - 1
+		else: sp_edge.y = b.position.y - 1 + b.size.y
 		openings[sp_side].append(_opening_range_for(sp_side, sp_edge, spawner_span))
 
 		var gl_cell := world_to_cell(goal_node.global_position)
@@ -961,7 +931,7 @@ func _create_bounds() -> void:
 		if gl_side == "left": gl_edge.x = b.position.x
 		elif gl_side == "right": gl_edge.x = b.position.x + b.size.x - 1
 		elif gl_side == "top": gl_edge.y = b.position.y
-		else: gl_edge.y = b.position.y + b.size.y - 1
+		else: gl_edge.y = b.position.y - 1 + b.size.y
 		openings[gl_side].append(_opening_range_for(gl_side, gl_edge, max(1, goal_span)))
 
 	_build_side_walls(container, "top",    top_z,    left_x, right_x, openings["top"])
@@ -1086,6 +1056,7 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_a4), inner_depth4, pen_thickness, pen_height, "PenRight_WingT")
 		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_b4), inner_depth4, pen_thickness, pen_height, "PenRight_WingB")
 
+
 func _make_wall(parent: Node3D, center_on_ground: Vector3, size_x: float, size_z: float, height: float, name: String) -> void:
 	if size_x <= 0.0001 or size_z <= 0.0001 or height <= 0.0001: return
 	var sb := StaticBody3D.new(); sb.name = name; parent.add_child(sb)
@@ -1129,9 +1100,7 @@ func _add_row_at_top() -> void:
 		tile.set("tile_board", self)
 		tile.set("placement_menu", placement_menu)
 		tiles[c2] = tile
-	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
-	_fit_reflection_probe(board_size_x, board_size_z, _step)
-	_fit_key_light(board_size_x, board_size_z, _step)
+	rebuild_bounds(); _recompute_flow(); _emit_path_changed(); _after_board_resized()
 
 func _add_row_at_bottom() -> void:
 	var new_z := board_size_z
@@ -1145,9 +1114,7 @@ func _add_row_at_bottom() -> void:
 		tile.set("tile_board", self)
 		tile.set("placement_menu", placement_menu)
 		tiles[c] = tile
-	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
-	_fit_reflection_probe(board_size_x, board_size_z, _step)
-	_fit_key_light(board_size_x, board_size_z, _step)
+	rebuild_bounds(); _recompute_flow(); _emit_path_changed(); _after_board_resized()
 
 func _add_column_at_spawner_edge() -> void:
 	var b := _grid_bounds()
@@ -1191,9 +1158,7 @@ func _add_column_at_spawner_edge() -> void:
 		"top": pass
 		"bottom": pass
 	_place_spawner_offboard_strip()
-	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
-	_fit_reflection_probe(board_size_x, board_size_z, _step)
-	_fit_key_light(board_size_x, board_size_z, _step)
+	rebuild_bounds(); _recompute_flow(); _emit_path_changed(); _after_board_resized()
 
 # ---------------- Enemy retag/move ----------------
 func _retag_enemy_cells(dx: int, dz: int) -> void:
@@ -1227,9 +1192,9 @@ func _apply_map_meta_expansions() -> void:
 	var left_rows  := _shard_meta_level_safe("board_add_left")
 	var right_rows := _shard_meta_level_safe("board_add_right")
 	var push_cols  := _shard_meta_level_safe("board_push_back")
-	for i in left_rows:  _add_row_at_top()
-	for i in right_rows: _add_row_at_bottom()
-	for i in push_cols:  _add_column_at_spawner_edge()
+	for i in range(left_rows):  _add_row_at_top()
+	for i in range(right_rows): _add_row_at_bottom()
+	for i in range(push_cols):  _add_column_at_spawner_edge()
 
 func _shard_meta_level_safe(id: String) -> int:
 	var s := get_node_or_null("/root/Shards")
@@ -1246,9 +1211,9 @@ func _apply_initial_board_from_powerups() -> void:
 	var add_left  := int(pu.call("applied_for", "board_add_left"))
 	var add_right := int(pu.call("applied_for", "board_add_right"))
 	var push_back := int(pu.call("applied_for", "board_push_back"))
-	for i in add_left:  _add_row_at_top()
-	for i in add_right: _add_row_at_bottom()
-	for i in push_back: _add_column_at_spawner_edge()
+	for i in range(add_left):  _add_row_at_top()
+	for i in range(add_right): _add_row_at_bottom()
+	for i in range(push_back): _add_column_at_spawner_edge()
 
 # ---------------- Public helpers ----------------
 func free_tile(cell: Vector2i) -> void:
@@ -1268,13 +1233,12 @@ func request_build_on_footprint(anchor_tile: Node, action: String, size: Vector2
 	set_active_tile(anchor_tile, action)
 	_on_place_selected(action)
 
-# ====================================================================
-# >>> PROBE / ENVIRONMENT HELPERS
-# ====================================================================
+# =================================================================
+#                    ENV / PROBE / LIGHTING
+# =================================================================
 func _ensure_world_environment() -> void:
 	if get_node_or_null(WORLDENV_NAME) != null:
 		return
-
 	var we := WorldEnvironment.new()
 	we.name = WORLDENV_NAME
 	add_child(we)
@@ -1282,53 +1246,54 @@ func _ensure_world_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_SKY
 
-	# Ambient lift so the far side isn't pure black
+	# Ambient lift
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	env.ambient_light_energy = ambient_energy
 	env.ambient_light_sky_contribution = ambient_sky_contrib
 
-	# Tonemapping in 4.x (property + enum name)
+	# Tonemapping / background scale
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
-	# Brighten the sky/background contribution a touch
 	env.background_energy_multiplier = sky_energy
 
-	# Procedural sky (4.x property names)
+	# Exposure / brightness lift (approx EV via 2^EV)
+	env.adjustment_enabled = exposure_enabled
+	env.adjustment_brightness = pow(2.0, exposure_ev)
+
+	# Bounce lighting (SDFGI)
+	if use_sdfgi:
+		env.sdfgi_enabled = true
+		env.sdfgi_energy = sdfgi_energy
+		env.sdfgi_bounce_feedback = sdfgi_bounce_feedback
+		env.sdfgi_min_cell_size = sdfgi_min_cell_size
+
+	# Procedural sky
 	var sky := Sky.new()
 	var mat := ProceduralSkyMaterial.new()
-	# Slightly bluish dark sky; tweak these two exports in the inspector
 	mat.sky_horizon_color    = sky_horizon
 	mat.ground_horizon_color = sky_horizon
 	mat.ground_bottom_color  = sky_ground
-	# Optional: a dim top color so zenith isn't pitch black
 	mat.sky_top_color        = Color(0.11, 0.13, 0.18)
-
 	sky.sky_material = mat
 	env.sky = sky
 
 	we.environment = env
 
-
-
-
 func _ensure_reflection_probe() -> ReflectionProbe:
-	var probe := get_node_or_null(PROBE_NAME) as ReflectionProbe
-	if probe == null:
-		probe = ReflectionProbe.new()
-		probe.name = PROBE_NAME
-		add_child(probe)
-		probe.box_projection = true
-		probe.update_mode = ReflectionProbe.UPDATE_ONCE
-		probe.intensity = 1.2   # small reflection boost
-	return probe
+	var rp := get_node_or_null(REFLECTION_PROBE_NAME) as ReflectionProbe
+	if rp != null:
+		return rp
+	rp = ReflectionProbe.new()
+	rp.name = REFLECTION_PROBE_NAME
+	rp.update_mode = ReflectionProbe.UPDATE_ONCE
+	rp.intensity = 1.0
+	rp.box_projection = true
+	add_child(rp)
+	return rp
 
-# Call whenever the board dimensions/origin change
-func _fit_reflection_probe(cols: int, rows: int, step: float) -> void:
-	if not use_reflection_probe:
-		var old := get_node_or_null(PROBE_NAME)
-		if old: old.queue_free()
-		return
-
-	_ensure_world_environment()
+func _fit_reflection_probe() -> void:
+	var cols := board_size_x
+	var rows := board_size_z
+	var step := tile_world_size()
 	var probe := _ensure_reflection_probe()
 
 	var w: float = float(cols) * step
@@ -1336,81 +1301,201 @@ func _fit_reflection_probe(cols: int, rows: int, step: float) -> void:
 	var margin: float = maxf(0.0, probe_margin_tiles) * step
 	var h: float = maxf(0.5, probe_height)
 
-	# Extents are half-sizes
+	# extents are half-sizes
 	probe.extents = Vector3(w * 0.5 + margin, h * 0.5, d * 0.5 + margin)
 
-	# Center over the board using _grid_origin
+	# center over the board
 	var center := Vector3(_grid_origin.x + w * 0.5, h * 0.5, _grid_origin.z + d * 0.5)
 	probe.global_position = center
 
-	# Trigger a refresh next frame (4.x way)
-	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+	# re-queue a capture by toggling visibility
+	if probe.update_mode == ReflectionProbe.UPDATE_ONCE:
+		probe.visible = false
+		probe.visible = true
 
-# ====================================================================
-# >>> KEY LIGHT HELPERS
-# ====================================================================
-func _ensure_key_light() -> Light3D:
-	var l := get_node_or_null(LIGHT_NAME) as Light3D
-	if l != null:
-		return l
+func _ensure_key_light() -> void:
+	var sun := get_node_or_null(KEY_LIGHT_NAME) as DirectionalLight3D
+	if sun == null:
+		sun = DirectionalLight3D.new()
+		sun.name = KEY_LIGHT_NAME
+		sun.shadow_enabled = true
+		# Avoid engine-specific enum to keep 4.x compatibility
+		sun.shadow_blur = 2.0
+		sun.shadow_normal_bias = 0.6
+		sun.shadow_bias = 0.02
+		sun.light_color = Color(1.0, 0.98, 0.95) # tiny warmth
+		add_child(sun)
 
-	match key_light_type:
-		0:
-			var dl := DirectionalLight3D.new()
-			dl.name = LIGHT_NAME
-			add_child(dl)
-			dl.shadow_enabled = true
-			dl.rotation_degrees = Vector3(-55.0, 35.0, 0.0)
-			return dl
-		1:
-			var ol := OmniLight3D.new()
-			ol.name = LIGHT_NAME
-			add_child(ol)
-			ol.shadow_enabled = true
-			return ol
-		2:
-			var sl := SpotLight3D.new()
-			sl.name = LIGHT_NAME
-			add_child(sl)
-			sl.shadow_enabled = true
-			return sl
-		_:
-			var dl2 := DirectionalLight3D.new()
-			dl2.name = LIGHT_NAME
-			add_child(dl2)
-			return dl2
+	# Energy based on Physical Light Units setting
+	var use_plu := bool(ProjectSettings.get_setting(
+		"rendering/lights_and_shadows/use_physical_light_units", false))
+	sun.light_energy = (key_energy_lux if use_plu else key_energy_legacy)
 
-func _fit_key_light(cols: int, rows: int, step: float) -> void:
-	if not use_key_light:
-		var old := get_node_or_null(LIGHT_NAME)
+	# Aim overhead-ish
+	if single_sun_mode:
+		sun.rotation_degrees = Vector3(key_angle_deg, key_azimuth_deg, 0.0)
+	else:
+		sun.rotation_degrees = Vector3(key_angle_deg, key_azimuth_deg, 0.0)
+
+	_fit_key_shadow_distance()
+
+func _fit_key_shadow_distance() -> void:
+	_fit_shadow_distance_for(KEY_LIGHT_NAME)
+
+func _fit_shadow_distance_for(light_name: String) -> void:
+	var d := get_node_or_null(light_name) as DirectionalLight3D
+	if d == null: return
+	var step := tile_world_size()
+	var longest: float = float(max(board_size_x, board_size_z)) * step
+	d.directional_shadow_max_distance = longest * 2.0
+
+# Opposite soft directional (no shadows) to prevent dark side
+func _ensure_fill_sun() -> void:
+	var sun := get_node_or_null(KEY_LIGHT_NAME) as DirectionalLight3D
+	if sun == null:
+		_ensure_key_light()
+		sun = get_node_or_null(KEY_LIGHT_NAME) as DirectionalLight3D
+	if sun == null:
+		return
+
+	var fill := get_node_or_null(FILL_SUN_NAME) as DirectionalLight3D
+	if fill == null:
+		fill = DirectionalLight3D.new()
+		fill.name = FILL_SUN_NAME
+		fill.shadow_enabled = false
+		fill.light_color = Color(1, 1, 1)
+		add_child(fill)
+
+	var use_plu := bool(ProjectSettings.get_setting(
+		"rendering/lights_and_shadows/use_physical_light_units", false))
+	var key_energy := (key_energy_lux if use_plu else key_energy_legacy)
+	fill.light_energy = maxf(0.0, key_energy * clamp(fill_sun_ratio, 0.0, 1.0))
+
+	var az := key_azimuth_deg + fill_sun_azimuth_offset_deg
+	fill.rotation_degrees = Vector3(
+		clampf(fill_sun_angle_deg, 60.0, 89.0),  # near-overhead
+		az,
+		0.0
+	)
+
+	_fit_shadow_distance_for(FILL_SUN_NAME)
+
+# Camera-follow fill so the near side never falls into silhouette (optional)
+func _ensure_camera_fill() -> void:
+	var use_plu := bool(ProjectSettings.get_setting(
+		"rendering/lights_and_shadows/use_physical_light_units", false))
+	var energy := (fill_energy_lm if use_plu else fill_energy_legacy)
+
+	if energy <= 0.0:
+		var old := get_node_or_null(FILL_LIGHT_NAME)
 		if old: old.queue_free()
 		return
 
-	var L := _ensure_key_light()
-	L.light_color = key_light_color
-	L.light_energy = key_light_energy
+	var fill := get_node_or_null(FILL_LIGHT_NAME) as OmniLight3D
+	if fill == null:
+		fill = OmniLight3D.new()
+		fill.name = FILL_LIGHT_NAME
+		fill.shadow_enabled = false
+		add_child(fill)
 
-	if L is DirectionalLight3D:
-		var w: float = float(cols) * step
-		var d: float = float(rows) * step
-		var center := Vector3(_grid_origin.x + w * 0.5, key_light_height, _grid_origin.z + d * 0.5)
-		(L as Node3D).global_position = center
-		return
+	fill.light_energy = energy
+	fill.light_specular = clamp(fill_specular, 0.0, 1.0)
+	fill.light_color = Color(1, 1, 1)
 
-	var w2: float = float(cols) * step
-	var d2: float = float(rows) * step
-	var board_diag: float = sqrt(w2 * w2 + d2 * d2)
-	var center2 := Vector3(_grid_origin.x + w2 * 0.5, key_light_height, _grid_origin.z + d2 * 0.5)
+	var w := float(board_size_x) * tile_size
+	var d := float(board_size_z) * tile_size
+	var diag := sqrt(w*w + d*d)
+	fill.omni_range = maxf(8.0, diag * 1.2)
 
-	if L is OmniLight3D:
-		var o := L as OmniLight3D
-		o.global_position = center2
-		o.omni_range = board_diag * key_light_range_tiles
-	elif L is SpotLight3D:
-		var s := L as SpotLight3D
-		var offset := Vector3(0.0, key_light_height, maxf(w2, d2) * 0.35)
-		var spot_pos := Vector3(_grid_origin.x + w2 * 0.5, 0.0, _grid_origin.z + d2 * 0.5) + offset
-		s.global_position = spot_pos
-		s.look_at(center2, Vector3.UP)
-		s.spot_angle = deg_to_rad(key_light_spot_angle_deg)
-		s.omni_range = board_diag * key_light_range_tiles
+	var cam := get_viewport().get_camera_3d()
+	if cam:
+		# Use camera world position; hover slightly above
+		fill.global_position = cam.global_transform.origin + Vector3(0.0, maxf(1.0, fill_height), 0.0)
+
+# Called any time the board grows/shrinks so lights/shadows/probe fit
+func _after_board_resized() -> void:
+	_fit_reflection_probe()
+	_fit_key_shadow_distance()
+	if dual_sun_mode:
+		_ensure_fill_sun()
+	_ensure_key_light()
+	_ensure_camera_fill()
+
+# Optional: four spot lights in board corners, aimed at center
+func _ensure_corner_spots() -> void:
+	var rig := get_node_or_null(CORNER_RIG_NAME) as Node3D
+	if rig == null:
+		rig = Node3D.new()
+		rig.name = CORNER_RIG_NAME
+		add_child(rig)
+	for c in rig.get_children():
+		c.queue_free()
+
+	var use_plu := bool(ProjectSettings.get_setting(
+		"rendering/lights_and_shadows/use_physical_light_units", false))
+	var energy := (spot_energy_lm if use_plu else spot_energy_legacy)
+
+	var w := float(board_size_x) * tile_size
+	var d := float(board_size_z) * tile_size
+	var y := maxf(3.0, spot_height)
+	var cx := _grid_origin.x + 0.5 * w
+	var cz := _grid_origin.z + 0.5 * d
+
+	var corners := [
+		Vector3(_grid_origin.x - 0.4 * tile_size, y, _grid_origin.z - 0.4 * tile_size),
+		Vector3(_grid_origin.x + w + 0.4 * tile_size, y, _grid_origin.z - 0.4 * tile_size),
+		Vector3(_grid_origin.x - 0.4 * tile_size, y, _grid_origin.z + d + 0.4 * tile_size),
+		Vector3(_grid_origin.x + w + 0.4 * tile_size, y, _grid_origin.z + d + 0.4 * tile_size)
+	]
+
+	for i in range(corners.size()):
+		var s := SpotLight3D.new()
+		s.name = "CornerSpot_%d" % i
+		s.light_energy = energy
+		s.spot_angle = clampf(spot_cone_deg, 5.0, 85.0)
+		s.shadow_enabled = spot_shadow
+		s.shadow_blur = spot_soft_shadow
+		rig.add_child(s)
+		s.global_position = corners[i]
+
+		var to_center := (Vector3(cx, 0.0, cz) - s.global_position)
+		if to_center.length() > 0.001:
+			var basis := Basis().looking_at(to_center.normalized(), Vector3.UP)
+			var xf := Transform3D(basis, s.global_position)
+			s.global_transform = xf
+
+# Optional: a soft omni at the board center to lift mid-tones
+func _ensure_center_bounce() -> void:
+	var old := get_node_or_null(CENTER_BOUNCE_NAME) as OmniLight3D
+	if old == null:
+		old = OmniLight3D.new()
+		old.name = CENTER_BOUNCE_NAME
+		old.shadow_enabled = false
+		add_child(old)
+
+	var use_plu := bool(ProjectSettings.get_setting(
+		"rendering/lights_and_shadows/use_physical_light_units", false))
+	old.light_energy = (center_bounce_energy_lm if use_plu else center_bounce_energy_legacy)
+	old.light_specular = clamp(center_bounce_specular, 0.0, 1.0)
+
+	var w := float(board_size_x) * tile_size
+	var d := float(board_size_z) * tile_size
+	var diag := sqrt(w*w + d*d)
+	old.omni_range = maxf(10.0, diag * 0.75)
+
+	var cx := _grid_origin.x + 0.5 * w
+	var cz := _grid_origin.z + 0.5 * d
+	old.global_position = Vector3(cx, maxf(1.5, probe_height * 0.4), cz)
+
+# Optional: a very soft rim light to add crisp edges
+func _ensure_rim_light() -> void:
+	var rim := get_node_or_null(RIM_LIGHT_NAME) as DirectionalLight3D
+	if rim == null:
+		rim = DirectionalLight3D.new()
+		rim.name = RIM_LIGHT_NAME
+		rim.shadow_enabled = false
+		rim.light_color = Color(1.0, 1.0, 1.0)
+		add_child(rim)
+
+	rim.light_energy = rim_energy
+	rim.rotation_degrees = Vector3(clampf(rim_angle_deg, 5.0, 45.0), rim_azimuth_deg, 0.0)
