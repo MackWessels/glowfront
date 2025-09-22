@@ -20,3 +20,6 @@ res://scenes/mortar_shell.tscn
 res://scenes/miner_tower.tscn
 res://scenes/enemy_carrier.tscn
 res://scenes/sniper_tower.tscn
+res://scripts/enemy_spawner.gd
+res://shaders/EdgeGlowBuilder.gd
+res://scripts/tile_board.gd

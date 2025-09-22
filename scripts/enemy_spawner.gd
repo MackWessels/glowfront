@@ -74,7 +74,7 @@ class_name EnemySpawner
 @export var clamp_speed_max: float = 20.0
 
 # ---------------- Debug ----------------
-@export var debug_waves: bool = true
+@export var debug_waves: bool = false
 
 # ---------------- State ----------------
 var _board: Node = null

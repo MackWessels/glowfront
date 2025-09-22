@@ -32,7 +32,6 @@ var _debug_mesh_enabled := false
 
 var _pending_hover_cells: Array[Vector2i] = []  # cells currently blue because of hover
 
-
 # Collision (Enemy on Layer 3, mask includes 2)
 @export var wall_collision_layer: int = 1 << 1
 @export var wall_collision_mask:  int = 1 << 2
@@ -53,21 +52,41 @@ var _pending_hover_cells: Array[Vector2i] = []  # cells currently blue because o
 @export var anchor_spawner_offboard: bool = true
 @export var offboard_distance_tiles: float = 1.0
 
+# --------- ReflectionProbe / Environment (board-owned) ----------
+@export var use_reflection_probe: bool = true
+@export var probe_height: float = 8.0            # world-height of capture box
+@export var probe_margin_tiles: float = 1.0      # extra capture margin in tiles
+
+# --------- Ambient / Sky lift (to avoid far-side darkness) -------
+@export var ambient_energy: float = 0.18         # 0..2
+@export var ambient_sky_contrib: float = 0.7     # 0..1
+@export var sky_energy: float = 1.1
+@export var sky_horizon: Color = Color(0.12, 0.14, 0.18)
+@export var sky_ground: Color = Color(0.10, 0.11, 0.13)
+
+# --------- Key light (board-owned) ----------
+@export var use_key_light: bool = true
+# 0 = Directional, 1 = Omni, 2 = Spot
+@export_enum("Directional","Omni","Spot") var key_light_type: int = 0
+@export var key_light_color: Color = Color(1, 1, 1)
+@export var key_light_energy: float = 1.0
+@export var key_light_height: float = 12.0
+@export var key_light_range_tiles: float = 1.2
+@export var key_light_spot_angle_deg: float = 55.0
+
 # Groups / polling
 const ENEMY_GROUP: String = "enemy"
 const PENDING_POLL_HZ := 6.0
 
-
-# --- add these exports near your other Costs ---
+# --- additional costs ---
 @export var wall_cost: int = 5
 @export var miner_cost: int = 10
 @export var tesla_cost: int = 10
-@export var shard_miner_cost: int = 20   # default matches old behavior (used to mirror mortar)
-@export var sniper_cost: int = 16   # cost for 1×1 sniper (NEW)
+@export var shard_miner_cost: int = 20
+@export var sniper_cost: int = 16
 
-# --- add this PUBLIC helper (buttons will call this) ---
+# --- public helper for UI ---
 func get_action_cost(action: String) -> int:
-	# use the same path the board uses when actually charging
 	return _power_cost_for(action)
 
 func _cost_for_action(action: String) -> int:
@@ -78,10 +97,8 @@ func _cost_for_action(action: String) -> int:
 		"miner":        return miner_cost
 		"tesla":        return tesla_cost
 		"shard_miner":  return (shard_miner_cost if shard_miner_cost >= 0 else mortar_cost)
-		"sniper":       return (sniper_cost if sniper_cost >= 0 else turret_cost)   # NEW
+		"sniper":       return (sniper_cost if sniper_cost >= 0 else turret_cost)
 		_:              return 0
-
-
 
 # ---------------- Signals ----------------
 signal global_path_changed
@@ -110,6 +127,11 @@ const ORTHO_DIRS: Array[Vector2i] = [
 ]
 const EPS := 0.0001
 
+# --- Node names ---
+const PROBE_NAME := "BoardReflectionProbe"
+const WORLDENV_NAME := "WorldEnvironment"
+const LIGHT_NAME := "BoardKeyLight"
+
 # ---------------- Lifecycle ----------------
 func _ready() -> void:
 	add_to_group("TileBoard")
@@ -126,6 +148,10 @@ func _ready() -> void:
 	_apply_initial_board_from_powerups()
 	if use_bounds:
 		_create_bounds()
+
+	# Fit probe + key light once the board is built
+	_fit_reflection_probe(board_size_x, board_size_z, _step)
+	_fit_key_light(board_size_x, board_size_z, _step)
 
 	_recompute_flow()
 	_emit_path_changed()
@@ -146,6 +172,9 @@ func _physics_process(delta: float) -> void:
 func rebuild_bounds() -> void:
 	if use_bounds:
 		_create_bounds()
+	# keep visuals aligned
+	_fit_reflection_probe(board_size_x, board_size_z, _step)
+	_fit_key_light(board_size_x, board_size_z, _step)
 
 # ---------------- PowerUps hookup ----------------
 func _connect_powerups() -> void:
@@ -174,7 +203,6 @@ func set_active_tile(tile: Node, armed_action: String = "") -> void:
 		_pending_tile = tile
 		active_tile = tile
 
-		# Decide footprint size based on action
 		var size := Vector2i(1, 1)
 		if armed_action == "mortar" or armed_action == "shard_miner":
 			size = Vector2i(2, 2)
@@ -188,7 +216,6 @@ func set_active_tile(tile: Node, armed_action: String = "") -> void:
 				t.call("set_pending_blue", true)
 			_pending_hover_cells.append(c)
 
-
 func clear_active_tile(tile: Node = null) -> void:
 	if tile != null and tile != _pending_tile:
 		return
@@ -196,7 +223,6 @@ func clear_active_tile(tile: Node = null) -> void:
 
 func _clear_pending() -> void:
 	_clear_pending_hover()
-
 
 func _clear_pending_hover() -> void:
 	for c in _pending_hover_cells:
@@ -206,7 +232,6 @@ func _clear_pending_hover() -> void:
 	_pending_hover_cells.clear()
 	_pending_tile = null
 	active_tile = null
-
 
 # ---------------- Economy ----------------
 func _econ_balance() -> int:
@@ -235,19 +260,15 @@ func _econ_spend(cost_val: int) -> bool:
 		ok = _econ_balance() >= cost_val
 	return ok
 
-
 func _placement_succeeded(tile: Node, action: String) -> bool:
 	match action:
-		"turret", "mortar", "sniper":   # NEW
+		"turret", "mortar", "sniper":
 			if tile and tile.has_method("has_turret"):
 				return bool(tile.call("has_turret"))
 			var tower: Node = tile.find_child("Tower", true, false)
 			return tower != null
 		_:
 			return true
-
-
-
 
 # ---------------- Board generation ----------------
 func generate_board() -> void:
@@ -503,39 +524,30 @@ func _tile_is_walkable(cell: Vector2i) -> bool:
 	if t and t.has_method("has_turret"):
 		return not bool(t.call("has_turret"))
 
-	# NEW: any descendant that belongs to "building" group blocks the tile
+	# Any descendant in "building" blocks
 	if _node_or_desc_has_group(t, "building"):
 		return false
 
-	# Legacy fallback: child literally named "Tower"
+	# Legacy fallback: child named "Tower"
 	var tower: Node = t.find_child("Tower", true, false)
 	return tower == null
 
-# --- Helpers: group check on a node OR any of its descendants ---
 func _node_or_desc_has_group(root: Node, group: String) -> bool:
 	if root == null:
 		return false
 	if root.is_in_group(group):
 		return true
-	# Fast path: if you prefer, you can loop the group list instead:
-	# for n in get_tree().get_nodes_in_group(group):
-	#     if root.is_ancestor_of(n): return true
-	# return false
-
 	for c in root.get_children():
 		if _node_or_desc_has_group(c as Node, group):
 			return true
 	return false
 
-
 func _path_ok_if_blocked(block_cells: Array[Vector2i]) -> bool:
 	for c in block_cells:
 		_reserved_cells[c] = true
-	# Run once with reservations applied
 	var ok_bfs := _recompute_flow()
 	var reachable := false
 	if ok_bfs:
-		# Verify reachability from any real spawn opening, not the clamped spawner cell
 		var entries := spawn_pen_cells(spawner_span)
 		for sc in entries:
 			if cost.has(sc):
@@ -543,12 +555,10 @@ func _path_ok_if_blocked(block_cells: Array[Vector2i]) -> bool:
 				break
 	else:
 		reachable = false
-	# Cleanup and restore field
 	for c in block_cells:
 		_reserved_cells.erase(c)
 	_recompute_flow()
 	return reachable
-
 
 # ---------------- Enemy-facing API ----------------
 func next_cell_from(c: Vector2i) -> Vector2i:
@@ -701,29 +711,24 @@ func _on_place_selected(action: String) -> void:
 		var cells := _footprint_cells_for(anchor, Vector2i(2, 2))
 		var action_cost := _power_cost_for("mortar")
 
-		# Affordability
 		if action_cost > 0 and not _econ_can_afford(action_cost):
 			return
 
-		# Disallow in spawn opening strip
 		for c in cells:
 			if _is_in_spawn_opening(c, spawner_span):
 				_clear_pending()
 				return
 
-		# Footprint must be empty (no buildings on any of the 4 cells)
 		for c2 in cells:
 			if not _tile_is_walkable(c2):
 				_clear_pending()
 				return
 
-		# Path test using real spawn openings (temporary block)
 		var ok_path := _path_ok_if_blocked(cells)
 		if not ok_path:
 			_clear_pending()
 			return
 
-		# Defer if enemies present on any of the 4 cells
 		var any_enemies := false
 		for c3 in cells:
 			if _enemies_on_cell(c3).size() > 0:
@@ -747,7 +752,6 @@ func _on_place_selected(action: String) -> void:
 			_emit_path_changed()
 			return
 
-		# Place immediately
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
 		if active_tile.has_method("apply_placement"):
@@ -780,25 +784,21 @@ func _on_place_selected(action: String) -> void:
 		if action_cost_sm > 0 and not _econ_can_afford(action_cost_sm):
 			return
 
-		# Disallow in spawn opening strip
 		for csm in cells_sm:
 			if _is_in_spawn_opening(csm, spawner_span):
 				_clear_pending()
 				return
 
-		# Footprint must be empty
 		for csm2 in cells_sm:
 			if not _tile_is_walkable(csm2):
 				_clear_pending()
 				return
 
-		# Path test using real spawn openings (temporary block)
 		var ok_path_sm := _path_ok_if_blocked(cells_sm)
 		if not ok_path_sm:
 			_clear_pending()
 			return
 
-		# Defer if enemies present on any of the 4 cells
 		var any_enemies_sm := false
 		for csm3 in cells_sm:
 			if _enemies_on_cell(csm3).size() > 0:
@@ -822,7 +822,6 @@ func _on_place_selected(action: String) -> void:
 			_emit_path_changed()
 			return
 
-		# Place immediately
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
 		if active_tile.has_method("apply_placement"):
@@ -846,32 +845,28 @@ func _on_place_selected(action: String) -> void:
 		_clear_pending()
 		return
 
-	# ---------------- Standard blocking (turret / wall / miner / tesla) ----------------
+	# ---------------- Standard blocking (turret / wall / miner / tesla / sniper) ----------------
 	var pos: Vector2i = active_tile.get("grid_position")
-	var blocks := (action == "turret" or action == "wall" or action == "miner" or action == "tesla" or action == "sniper") 
+	var blocks := (action == "turret" or action == "wall" or action == "miner" or action == "tesla" or action == "sniper")
 	var action_cost2 := _power_cost_for(action)
 
 	if blocks and action_cost2 > 0 and not _econ_can_afford(action_cost2):
 		return
 
-	# Don’t allow blocking directly in the spawn opening
 	if blocks and _is_in_spawn_opening(pos, spawner_span):
 		_clear_pending()
 		return
 
-	# NEW: cannot build on an already-occupied tile (just ignore; no break)
 	if blocks and not _tile_is_walkable(pos):
 		_clear_pending()
 		return
 
 	if blocks:
-		# Path test using real spawn openings (temporary block of this single cell)
 		var ok_path2 := _path_ok_if_blocked([pos])
 		if not ok_path2:
 			_clear_pending()
 			return
 
-		# If enemies currently on the cell, defer until clear
 		if _enemies_on_cell(pos).size() > 0:
 			if active_tile.has_method("set_pending_blue"): active_tile.call("set_pending_blue", true)
 			_reserve_cell(pos, true)
@@ -880,7 +875,6 @@ func _on_place_selected(action: String) -> void:
 			_emit_path_changed()
 			return
 
-		# Place immediately
 		if _pending_tile and is_instance_valid(_pending_tile) and _pending_tile.has_method("set_pending_blue"):
 			_pending_tile.call("set_pending_blue", false)
 		if active_tile.has_method("apply_placement"):
@@ -888,7 +882,6 @@ func _on_place_selected(action: String) -> void:
 
 		var ok3 := _recompute_flow()
 		if not ok3:
-			# We only break if we already placed and it invalidated the path.
 			if active_tile.has_method("break_tile"): active_tile.call("break_tile")
 			_recompute_flow()
 			_emit_path_changed()
@@ -914,8 +907,6 @@ func _on_place_selected(action: String) -> void:
 	_emit_path_changed()
 	_clear_pending()
 
-
-
 # ---------------- Helpers ----------------
 func _power_cost_for(action: String) -> int:
 	var base := _cost_for_action(action)
@@ -936,7 +927,7 @@ func _footprint_cells_for(anchor: Vector2i, size: Vector2i) -> Array[Vector2i]:
 			if _in_bounds(c): out.append(c)
 	return out
 
-# ---------------- BOUNDS & PENS (unchanged behavior) ----------------
+# ---------------- BOUNDS & PENS ----------------
 func _create_bounds() -> void:
 	while true:
 		var old := get_node_or_null("BoardBounds")
@@ -1139,6 +1130,8 @@ func _add_row_at_top() -> void:
 		tile.set("placement_menu", placement_menu)
 		tiles[c2] = tile
 	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
+	_fit_reflection_probe(board_size_x, board_size_z, _step)
+	_fit_key_light(board_size_x, board_size_z, _step)
 
 func _add_row_at_bottom() -> void:
 	var new_z := board_size_z
@@ -1153,6 +1146,8 @@ func _add_row_at_bottom() -> void:
 		tile.set("placement_menu", placement_menu)
 		tiles[c] = tile
 	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
+	_fit_reflection_probe(board_size_x, board_size_z, _step)
+	_fit_key_light(board_size_x, board_size_z, _step)
 
 func _add_column_at_spawner_edge() -> void:
 	var b := _grid_bounds()
@@ -1197,6 +1192,8 @@ func _add_column_at_spawner_edge() -> void:
 		"bottom": pass
 	_place_spawner_offboard_strip()
 	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
+	_fit_reflection_probe(board_size_x, board_size_z, _step)
+	_fit_key_light(board_size_x, board_size_z, _step)
 
 # ---------------- Enemy retag/move ----------------
 func _retag_enemy_cells(dx: int, dz: int) -> void:
@@ -1263,10 +1260,157 @@ func free_tile(cell: Vector2i) -> void:
 
 func request_build_on_tile(tile: Node, action: String) -> void:
 	if tile == null or not is_instance_valid(tile): return
-	set_active_tile(tile, action)   # pass action
+	set_active_tile(tile, action)
 	_on_place_selected(action)
 
 func request_build_on_footprint(anchor_tile: Node, action: String, size: Vector2i) -> void:
 	if anchor_tile == null or not is_instance_valid(anchor_tile): return
-	set_active_tile(anchor_tile, action)  # pass action
+	set_active_tile(anchor_tile, action)
 	_on_place_selected(action)
+
+# ====================================================================
+# >>> PROBE / ENVIRONMENT HELPERS
+# ====================================================================
+func _ensure_world_environment() -> void:
+	if get_node_or_null(WORLDENV_NAME) != null:
+		return
+
+	var we := WorldEnvironment.new()
+	we.name = WORLDENV_NAME
+	add_child(we)
+
+	var env := Environment.new()
+	env.background_mode = Environment.BG_SKY
+
+	# Ambient lift so the far side isn't pure black
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = ambient_energy
+	env.ambient_light_sky_contribution = ambient_sky_contrib
+
+	# Tonemapping in 4.x (property + enum name)
+	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	# Brighten the sky/background contribution a touch
+	env.background_energy_multiplier = sky_energy
+
+	# Procedural sky (4.x property names)
+	var sky := Sky.new()
+	var mat := ProceduralSkyMaterial.new()
+	# Slightly bluish dark sky; tweak these two exports in the inspector
+	mat.sky_horizon_color    = sky_horizon
+	mat.ground_horizon_color = sky_horizon
+	mat.ground_bottom_color  = sky_ground
+	# Optional: a dim top color so zenith isn't pitch black
+	mat.sky_top_color        = Color(0.11, 0.13, 0.18)
+
+	sky.sky_material = mat
+	env.sky = sky
+
+	we.environment = env
+
+
+
+
+func _ensure_reflection_probe() -> ReflectionProbe:
+	var probe := get_node_or_null(PROBE_NAME) as ReflectionProbe
+	if probe == null:
+		probe = ReflectionProbe.new()
+		probe.name = PROBE_NAME
+		add_child(probe)
+		probe.box_projection = true
+		probe.update_mode = ReflectionProbe.UPDATE_ONCE
+		probe.intensity = 1.2   # small reflection boost
+	return probe
+
+# Call whenever the board dimensions/origin change
+func _fit_reflection_probe(cols: int, rows: int, step: float) -> void:
+	if not use_reflection_probe:
+		var old := get_node_or_null(PROBE_NAME)
+		if old: old.queue_free()
+		return
+
+	_ensure_world_environment()
+	var probe := _ensure_reflection_probe()
+
+	var w: float = float(cols) * step
+	var d: float = float(rows) * step
+	var margin: float = maxf(0.0, probe_margin_tiles) * step
+	var h: float = maxf(0.5, probe_height)
+
+	# Extents are half-sizes
+	probe.extents = Vector3(w * 0.5 + margin, h * 0.5, d * 0.5 + margin)
+
+	# Center over the board using _grid_origin
+	var center := Vector3(_grid_origin.x + w * 0.5, h * 0.5, _grid_origin.z + d * 0.5)
+	probe.global_position = center
+
+	# Trigger a refresh next frame (4.x way)
+	probe.update_mode = ReflectionProbe.UPDATE_ONCE
+
+# ====================================================================
+# >>> KEY LIGHT HELPERS
+# ====================================================================
+func _ensure_key_light() -> Light3D:
+	var l := get_node_or_null(LIGHT_NAME) as Light3D
+	if l != null:
+		return l
+
+	match key_light_type:
+		0:
+			var dl := DirectionalLight3D.new()
+			dl.name = LIGHT_NAME
+			add_child(dl)
+			dl.shadow_enabled = true
+			dl.rotation_degrees = Vector3(-55.0, 35.0, 0.0)
+			return dl
+		1:
+			var ol := OmniLight3D.new()
+			ol.name = LIGHT_NAME
+			add_child(ol)
+			ol.shadow_enabled = true
+			return ol
+		2:
+			var sl := SpotLight3D.new()
+			sl.name = LIGHT_NAME
+			add_child(sl)
+			sl.shadow_enabled = true
+			return sl
+		_:
+			var dl2 := DirectionalLight3D.new()
+			dl2.name = LIGHT_NAME
+			add_child(dl2)
+			return dl2
+
+func _fit_key_light(cols: int, rows: int, step: float) -> void:
+	if not use_key_light:
+		var old := get_node_or_null(LIGHT_NAME)
+		if old: old.queue_free()
+		return
+
+	var L := _ensure_key_light()
+	L.light_color = key_light_color
+	L.light_energy = key_light_energy
+
+	if L is DirectionalLight3D:
+		var w: float = float(cols) * step
+		var d: float = float(rows) * step
+		var center := Vector3(_grid_origin.x + w * 0.5, key_light_height, _grid_origin.z + d * 0.5)
+		(L as Node3D).global_position = center
+		return
+
+	var w2: float = float(cols) * step
+	var d2: float = float(rows) * step
+	var board_diag: float = sqrt(w2 * w2 + d2 * d2)
+	var center2 := Vector3(_grid_origin.x + w2 * 0.5, key_light_height, _grid_origin.z + d2 * 0.5)
+
+	if L is OmniLight3D:
+		var o := L as OmniLight3D
+		o.global_position = center2
+		o.omni_range = board_diag * key_light_range_tiles
+	elif L is SpotLight3D:
+		var s := L as SpotLight3D
+		var offset := Vector3(0.0, key_light_height, maxf(w2, d2) * 0.35)
+		var spot_pos := Vector3(_grid_origin.x + w2 * 0.5, 0.0, _grid_origin.z + d2 * 0.5) + offset
+		s.global_position = spot_pos
+		s.look_at(center2, Vector3.UP)
+		s.spot_angle = deg_to_rad(key_light_spot_angle_deg)
+		s.omni_range = board_diag * key_light_range_tiles

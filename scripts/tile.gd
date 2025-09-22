@@ -62,7 +62,7 @@ var occupied_by_anchor: Vector2i = FP_NONE        # != FP_NONE if claimed by any
 
 # ---------- Hatch animation (exported tunables) ----------
 @export var hatch_axis_is_x: bool = true      # true = shrink along X, false = along Z
-@export var hatch_edge_dir: int = 1           # +1 = open toward +axis edge, -1 = toward -axis
+@export var hatch_edge_dir: int = 1           # +1 toward +axis edge, -1 toward -axis
 @export_range(0.0, 1.0, 0.01) var hatch_open_scale: float = 0.02
 @export var hatch_open_time: float = 0.15
 @export var hatch_pause_time: float = 0.05
@@ -119,7 +119,7 @@ func _animate_hatch_and_raise(child: Node3D) -> void:
 	if not is_instance_valid(_tile_mesh):
 		return
 
-	# --- disarm while animating ---
+	# Disarm while animating so it can't shoot early.
 	_set_tower_armed(child, false)
 
 	# Cache start transforms
@@ -172,12 +172,11 @@ func _animate_hatch_and_raise(child: Node3D) -> void:
 	tw3.parallel().tween_property(_tile_mesh, "position", mesh_start_pos, hatch_close_time)
 	await tw3.finished
 
-	# --- arm after it’s up and closed ---
+	# Arm after it’s up and closed
 	if is_instance_valid(child):
 		_set_tower_armed(child, true)
 
-
-# Helper: enable/disable a tower's ability to shoot/detect
+# Enable/disable a tower's ability to shoot/detect
 func _set_tower_armed(t: Node, armed: bool) -> void:
 	if t == null: return
 	# Prefer explicit APIs if your tower exposes them
@@ -200,7 +199,6 @@ func _set_tower_armed(t: Node, armed: bool) -> void:
 	t.set_physics_process(armed)
 	t.set("shoot_enabled", armed) # harmless if unused
 
-
 # ========================================================
 # 1×1 placements (with hatch animation)
 # ========================================================
@@ -217,7 +215,7 @@ func place_turret() -> void:
 	is_broken = false
 	set_pending_blue(false)
 	if t is Node3D:
-		_animate_hatch_and_raise(t)
+		await _animate_hatch_and_raise(t)
 
 func place_wall() -> void:
 	if is_broken or wall_scene == null: return
@@ -230,8 +228,6 @@ func place_wall() -> void:
 	blocked = true
 	is_broken = false
 	set_pending_blue(false)
-	# Walls do not rise through a hatch (feels instant/solid). Add if desired:
-	# if w is Node3D: _animate_hatch_and_raise(w)
 
 func place_miner() -> void:
 	if is_broken or miner_scene == null: return
@@ -248,7 +244,7 @@ func place_miner() -> void:
 	is_broken = false
 	set_pending_blue(false)
 	if m is Node3D:
-		_animate_hatch_and_raise(m)
+		await _animate_hatch_and_raise(m)
 
 func place_tesla() -> void:
 	if is_broken or tesla_scene == null: return
@@ -265,7 +261,7 @@ func place_tesla() -> void:
 	is_broken = false
 	set_pending_blue(false)
 	if t is Node3D:
-		_animate_hatch_and_raise(t)
+		await _animate_hatch_and_raise(t)
 
 func place_sniper() -> void:
 	if is_broken or sniper_scene == null: return
@@ -280,7 +276,7 @@ func place_sniper() -> void:
 	is_broken = false
 	set_pending_blue(false)
 	if s is Node3D:
-		_animate_hatch_and_raise(s)
+		await _animate_hatch_and_raise(s)
 	# keep pathing correct even if base code changes later
 	_recompute_after_block(grid_position, Vector2i(1, 1))
 

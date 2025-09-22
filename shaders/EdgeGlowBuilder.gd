@@ -133,8 +133,8 @@ func _build_edge_lines() -> void:
 	child.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	_assign_and_tune_material(child)
 
-	print("[EdgeGlow] built  strips=", total_edges, "  quads=", total_quads,
-		"  width=", line_width, "  threshold=", angle_threshold_deg)
+	#print("[EdgeGlow] built  strips=", total_edges, "  quads=", total_quads,
+	#	"  width=", line_width, "  threshold=", angle_threshold_deg)
 
 # Make a local material, assign it, and apply bright params
 func _assign_and_tune_material(mi: MeshInstance3D) -> void:
