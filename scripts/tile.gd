@@ -114,26 +114,21 @@ func _tile_step() -> float:
 			step = float(tile_board.get("tile_size"))
 	return step
 
-# Plays: hatch open -> raise child -> hatch close
+# Plays: hatch open -> raise child -> hatch close (this tile only)
 func _animate_hatch_and_raise(child: Node3D) -> void:
 	if not is_instance_valid(_tile_mesh):
 		return
-
-	# Disarm while animating so it can't shoot early.
 	_set_tower_armed(child, false)
 
-	# Cache start transforms
 	var mesh_start_scale: Vector3 = _tile_mesh.scale
 	var mesh_start_pos: Vector3 = _tile_mesh.position
 
-	# Compute “open” target scale
 	var open_scale := mesh_start_scale
 	if hatch_axis_is_x:
 		open_scale.x = mesh_start_scale.x * max(hatch_open_scale, 0.001)
 	else:
 		open_scale.z = mesh_start_scale.z * max(hatch_open_scale, 0.001)
 
-	# Shift the mesh toward the chosen edge as it shrinks so one edge stays put
 	var step := _tile_step()
 	var shrink_ratio := (open_scale.x / mesh_start_scale.x) if hatch_axis_is_x else (open_scale.z / mesh_start_scale.z)
 	var offset_mag := 0.5 * step * (1.0 - shrink_ratio)
@@ -144,11 +139,9 @@ func _animate_hatch_and_raise(child: Node3D) -> void:
 	else:
 		open_pos.z += float(hatch_edge_dir) * offset_mag
 
-	# Prepare child to rise
 	var child_start := child.position
 	child.position = child_start + Vector3(0.0, -abs(raise_height), 0.0)
 
-	# Open hatch
 	var tw := create_tween()
 	tw.set_trans(tween_trans).set_ease(tween_ease_out)
 	tw.tween_property(_tile_mesh, "scale", open_scale, hatch_open_time)
@@ -156,7 +149,6 @@ func _animate_hatch_and_raise(child: Node3D) -> void:
 	await tw.finished
 	if not is_instance_valid(child) or not is_instance_valid(_tile_mesh): return
 
-	# Raise tower
 	var tw2 := create_tween()
 	tw2.set_trans(tween_trans).set_ease(tween_ease_out)
 	tw2.tween_property(child, "position:y", child_start.y, raise_time)
@@ -165,16 +157,118 @@ func _animate_hatch_and_raise(child: Node3D) -> void:
 	await tw2.finished
 	if not is_instance_valid(_tile_mesh): return
 
-	# Close hatch
 	var tw3 := create_tween()
 	tw3.set_trans(tween_trans).set_ease(tween_ease_in)
 	tw3.tween_property(_tile_mesh, "scale", mesh_start_scale, hatch_close_time)
 	tw3.parallel().tween_property(_tile_mesh, "position", mesh_start_pos, hatch_close_time)
 	await tw3.finished
 
-	# Arm after it’s up and closed
 	if is_instance_valid(child):
 		_set_tower_armed(child, true)
+
+# Plays hatch animation on all four tiles of a 2×2 footprint, raises at center
+func _animate_hatch_2x2_and_raise(child: Node3D, anchor: Vector2i) -> void:
+	if child == null or tile_board == null: return
+	var tiles_v: Variant = tile_board.get("tiles")
+	if typeof(tiles_v) != TYPE_DICTIONARY: return
+	var tiles: Dictionary = tiles_v
+
+	# Collect the four tiles; bail if any missing
+	var coords := [
+		anchor,
+		Vector2i(anchor.x + 1, anchor.y),
+		Vector2i(anchor.x, anchor.y + 1),
+		Vector2i(anchor.x + 1, anchor.y + 1)
+	]
+	var hatch_tiles: Array = []
+	for c in coords:
+		if not tiles.has(c): return
+		var t: Node = tiles[c]
+		if t == null: return
+		hatch_tiles.append(t)
+
+	# Disarm while animating
+	_set_tower_armed(child, false)
+
+	# Prepare child start (center of 2×2 already positioned by placement)
+	var child_start_pos: Vector3 = child.position
+	child.position = child_start_pos + Vector3(0.0, -abs(raise_height), 0.0)
+
+	# Lambda (Callable); call with .call()
+	var compute_open_targets := func(tile: Node) -> Dictionary:
+		var mesh: MeshInstance3D = tile.get_node_or_null("TileMesh")
+		if mesh == null:
+			return {}
+		var mesh_start_scale: Vector3 = mesh.scale
+		var mesh_start_pos: Vector3 = mesh.position
+
+		var open_scale := mesh_start_scale
+		var axis_is_x := bool(tile.get("hatch_axis_is_x"))
+		var edge_dir := int(tile.get("hatch_edge_dir"))
+		var open_scale_factor := float(tile.get("hatch_open_scale"))
+		open_scale_factor = clamp(open_scale_factor, 0.0, 1.0)
+
+		if axis_is_x:
+			open_scale.x = mesh_start_scale.x * max(open_scale_factor, 0.001)
+		else:
+			open_scale.z = mesh_start_scale.z * max(open_scale_factor, 0.001)
+
+		var step2 := _tile_step()
+		var shrink_ratio := (open_scale.x / mesh_start_scale.x) if axis_is_x else (open_scale.z / mesh_start_scale.z)
+		var offset_mag := 0.5 * step2 * (1.0 - shrink_ratio)
+		var open_pos := mesh_start_pos
+		if axis_is_x:
+			open_pos.x += float(edge_dir) * offset_mag
+		else:
+			open_pos.z += float(edge_dir) * offset_mag
+
+		return {
+			"mesh": mesh,
+			"mesh_start_scale": mesh_start_scale,
+			"mesh_start_pos": mesh_start_pos,
+			"open_scale": open_scale,
+			"open_pos": open_pos
+		}
+
+	# Gather per-tile targets
+	var per: Array[Dictionary] = []
+	for t in hatch_tiles:
+		var d: Dictionary = compute_open_targets.call(t)
+		if d.size() == 0: return
+		per.append(d)
+
+	# Timings / easing from *this* tile's exports
+	var open_t := hatch_open_time
+	var pause_t := hatch_pause_time
+	var close_t := hatch_close_time
+
+	# Open all hatches in parallel
+	var open_group := create_tween()
+	open_group.set_trans(tween_trans).set_ease(tween_ease_out)
+	for d in per:
+		open_group.parallel().tween_property(d["mesh"], "scale", d["open_scale"], open_t)
+		open_group.parallel().tween_property(d["mesh"], "position", d["open_pos"], open_t)
+	await open_group.finished
+	if not is_instance_valid(child): return
+
+	# Raise the child at center
+	var up := create_tween()
+	up.set_trans(tween_trans).set_ease(tween_ease_out)
+	up.tween_property(child, "position:y", child_start_pos.y, raise_time)
+	if pause_t > 0.0:
+		up.tween_interval(pause_t)
+	await up.finished
+
+	# Close all hatches in parallel
+	var close_group := create_tween()
+	close_group.set_trans(tween_trans).set_ease(tween_ease_in)
+	for d in per:
+		close_group.parallel().tween_property(d["mesh"], "scale", d["mesh_start_scale"], close_t)
+		close_group.parallel().tween_property(d["mesh"], "position", d["mesh_start_pos"], close_t)
+	await close_group.finished
+
+	# Re-arm
+	_set_tower_armed(child, true)
 
 # Enable/disable a tower's ability to shoot/detect
 func _set_tower_armed(t: Node, armed: bool) -> void:
@@ -281,7 +375,7 @@ func place_sniper() -> void:
 	_recompute_after_block(grid_position, Vector2i(1, 1))
 
 # ========================================================
-# 2×2 placements (no hatch by default; anchor-only hatch would be odd)
+# 2×2 placements (with multi-tile hatch animation)
 # ========================================================
 func place_mortar() -> void:
 	if is_broken or mortar_scene == null: return
@@ -338,6 +432,12 @@ func place_mortar() -> void:
 	is_broken = false
 	occupied_by_anchor = anchor
 
+	# Animate the four hatches + raise from center
+	if mortar is Node3D:
+		await _animate_hatch_2x2_and_raise(mortar, anchor)
+
+	_recompute_after_block(anchor, MORTAR_FOOT)
+
 func place_shard_miner() -> void:
 	if is_broken or shard_miner_scene == null: return
 	var board := tile_board
@@ -380,9 +480,9 @@ func place_shard_miner() -> void:
 	var sm := shard_miner_scene.instantiate()
 	add_child(sm)
 	if sm is Node3D:
-		var step := _tile_step()
-		if step > 0.0:
-			(sm as Node3D).global_position = global_position + Vector3(step * 0.5, 0.0, step * 0.5)
+		var step2 := _tile_step()
+		if step2 > 0.0:
+			(sm as Node3D).global_position = global_position + Vector3(step2 * 0.5, 0.0, step2 * 0.5)
 		else:
 			(sm as Node3D).global_transform = global_transform
 	if sm and sm.has_method("set_tile_context"):
@@ -396,6 +496,11 @@ func place_shard_miner() -> void:
 	blocked = true
 	is_broken = false
 	occupied_by_anchor = anchor
+
+	# Animate the four hatches + raise from center
+	if sm is Node3D:
+		await _animate_hatch_2x2_and_raise(sm, anchor)
+
 	_recompute_after_block(anchor, SHARD_MINER_FOOT)
 
 # ---------- Board recompute ----------

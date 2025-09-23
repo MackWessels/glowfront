@@ -57,75 +57,6 @@ var _pending_hover_cells: Array[Vector2i] = []
 @export var anchor_spawner_offboard: bool = true
 @export var offboard_distance_tiles: float = 1.0
 
-# ---------- Environment / Probe / Lighting ----------
-const WORLDENV_NAME := "WorldEnvironmentAuto"
-const REFLECTION_PROBE_NAME := "BoardReflectionProbe"
-const KEY_LIGHT_NAME := "KeyLight"
-const FILL_LIGHT_NAME := "CameraFill"
-const OVERHEAD_FILL_NAME := "OverheadFill"      # optional omni (off by default)
-const OVERHEAD_SUN_NAME := "OverheadSun"        # uniform overhead directional
-
-# Environment tuning (balanced & bright, color-safe)
-@export var ambient_energy: float = 0.65
-@export_range(0.0, 1.0, 0.01) var ambient_sky_contrib: float = 1.0
-@export var sky_energy: float = 1.6
-@export var sky_horizon: Color = Color(0.15, 0.18, 0.22)
-@export var sky_ground: Color  = Color(0.08, 0.09, 0.12)
-
-# “Film” grading / exposure (Godot 4)
-@export var exposure_enabled: bool = true
-@export var exposure_brightness: float = 1.10
-@export var exposure_contrast: float = 1.06
-@export var exposure_saturation: float = 1.08
-@export var auto_exposure: bool = true
-@export var auto_exposure_speed: float = 1.5
-@export var auto_exposure_grey: float = 0.18
-@export var auto_exposure_min_luma: float = 0.03
-@export var auto_exposure_max_luma: float = 2.0
-
-# Optional SDFGI bounce (bright)
-@export var use_sdfgi: bool = true
-@export var sdfgi_energy: float = 2.5
-@export var sdfgi_bounce_feedback: float = 0.95
-@export var sdfgi_min_cell_size: float = 0.5
-
-# Reflection probe sizing
-@export var probe_margin_tiles: float = 2.0
-@export var probe_height: float = 3.0
-
-@export var tonemap_exposure: float = 1.2   # global brightness lift
-
-# Single Sun Mode (main key)
-@export var single_sun_mode: bool = true
-@export var key_energy_lux: float = 130_000.0
-@export var key_energy_legacy: float = 7.0
-@export var key_angle_deg: float = 88.0
-@export var key_azimuth_deg: float = 0.0
-
-# Camera-follow fill (small lift; set energy 0 to disable)
-@export var fill_energy_lm: float = 40_000.0
-@export var fill_energy_legacy: float = 1.5
-@export var fill_height: float = 2.0
-@export var fill_specular: float = 0.10
-
-# Overhead omni (center hotspot; keep off unless desired)
-@export var use_overhead_fill: bool = false
-@export var overhead_fill_energy_lm: float = 60_000.0
-@export var overhead_fill_energy_legacy: float = 3.0
-@export var overhead_fill_height: float = 8.0
-@export var overhead_fill_specular: float = 0.05
-@export var overhead_fill_shadow: bool = false
-
-# Overhead directional fill (recommended)
-@export var use_overhead_sun: bool = true
-@export var overhead_sun_energy_lux: float = 80_000.0
-@export var overhead_sun_energy_legacy: float = 3.5
-@export var overhead_sun_specular: float = 0.0
-@export var overhead_sun_angle_deg: float = 89.0
-
-@export var exposure_ev: float = 1.25
-
-
 # ---------------- Groups / Polling ----------------
 const ENEMY_GROUP: String = "enemy"
 const PENDING_POLL_HZ := 6.0
@@ -139,7 +70,7 @@ var active_tile: Node = null
 
 var _pending_tile: Node = null
 var _reserved_cells: Dictionary = {}          # Vector2i -> true
-var _pending_builds: Array[Dictionary] = []   # items: {"cell":Vector2i,"cells":Array[Vector2i], "tile":Node, "action":String, "cost":int}
+var _pending_builds: Array[Dictionary] = []   # {"cell":Vector2i,"cells":Array[Vector2i], "tile":Node, "action":String, "cost":int}
 
 var cost: Dictionary = {}                     # Vector2i -> int
 var dir_field: Dictionary = {}                # Vector2i -> Vector3
@@ -188,18 +119,6 @@ func _ready() -> void:
 	if use_bounds:
 		_create_bounds()
 
-	# Visual setup
-	_ensure_world_environment()
-	_fit_reflection_probe()
-	_ensure_key_light()
-	_fit_key_shadow_distance()
-	_ensure_overhead_sun()
-	_ensure_camera_fill()
-	_ensure_overhead_fill()
-	_ensure_corner_spots()
-	_ensure_center_bounce()
-	_ensure_rim_light()
-
 	_recompute_flow()
 	_emit_path_changed()
 
@@ -209,7 +128,6 @@ func _ready() -> void:
 	call_deferred("_connect_powerups")
 
 func _physics_process(delta: float) -> void:
-	_ensure_camera_fill()
 	if _pending_builds.size() > 0:
 		_poll_accum += delta
 		var interval := 1.0 / PENDING_POLL_HZ
@@ -223,12 +141,8 @@ func rebuild_bounds() -> void:
 	_after_board_resized()
 
 func _after_board_resized() -> void:
-	_fit_reflection_probe()
-	_ensure_key_light()
-	_fit_key_shadow_distance()
-	_ensure_overhead_sun()
-	_ensure_camera_fill()
-	_ensure_overhead_fill()
+	# (Lighting & probe hooks removed)
+	pass
 
 # ================= PowerUps hookup =================
 func _connect_powerups() -> void:
@@ -1184,197 +1098,3 @@ func request_build_on_footprint(anchor_tile: Node, action: String, size: Vector2
 	if anchor_tile == null or not is_instance_valid(anchor_tile): return
 	set_active_tile(anchor_tile, action)
 	_on_place_selected(action)
-
-# =================================================================
-#                    ENV / PROBE / LIGHTING
-# =================================================================
-func _ensure_world_environment() -> void:
-	var we := get_node_or_null(WORLDENV_NAME) as WorldEnvironment
-	# If our named one isn't there, try reusing any existing WorldEnvironment in the scene.
-	if we == null:
-		for n in get_tree().get_nodes_in_group("WorldEnvironment"):
-			we = n as WorldEnvironment
-			if we != null:
-				break
-	if we == null:
-		we = WorldEnvironment.new()
-		we.name = WORLDENV_NAME
-		add_child(we)
-
-	# Reuse existing Environment resource if present, otherwise create it.
-	var env := we.environment
-	if env == null:
-		env = Environment.new()
-		we.environment = env
-
-	# --- Background / sky ---
-	env.background_mode = Environment.BG_SKY
-	env.background_energy_multiplier = sky_energy
-
-	var sky := env.sky
-	if sky == null:
-		sky = Sky.new()
-		env.sky = sky
-	var mat := sky.sky_material as ProceduralSkyMaterial
-	if mat == null:
-		mat = ProceduralSkyMaterial.new()
-		sky.sky_material = mat
-	mat.sky_top_color        = Color(0.11, 0.13, 0.18)
-	mat.sky_horizon_color    = sky_horizon
-	mat.ground_horizon_color = sky_horizon
-	mat.ground_bottom_color  = sky_ground
-
-	# --- Ambient lift ---
-	env.ambient_light_source           = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy           = ambient_energy
-	env.ambient_light_sky_contribution = ambient_sky_contrib
-
-	# --- Tonemapping / Exposure (Godot 4.4) ---
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	# Map EV → multiplier so increasing 'exposure_ev' actually brightens the scene.
-	var exposure_mul := (pow(2.0, exposure_ev) if exposure_enabled else 1.0)
-	env.tonemap_exposure = exposure_mul
-
-	# --- Optional SDFGI bounce ---
-	if use_sdfgi:
-		env.sdfgi_enabled         = true
-		env.sdfgi_energy          = sdfgi_energy
-		env.sdfgi_bounce_feedback = sdfgi_bounce_feedback
-		env.sdfgi_min_cell_size   = sdfgi_min_cell_size
-	else:
-		env.sdfgi_enabled = false
-
-	# Make sure the Environment is attached to the node in case we reused an existing one
-	we.environment = env
-
-	# Quick sanity print so you can confirm this runs once live:
-	print("WorldEnv applied: tonemap_exposure=", env.tonemap_exposure,
-		", ambient_energy=", env.ambient_light_energy,
-		", sky_energy=", env.background_energy_multiplier)
-
-
-
-func _ensure_reflection_probe() -> ReflectionProbe:
-	var rp := get_node_or_null(REFLECTION_PROBE_NAME) as ReflectionProbe
-	if rp != null: return rp
-	rp = ReflectionProbe.new()
-	rp.name = REFLECTION_PROBE_NAME
-	rp.update_mode = ReflectionProbe.UPDATE_ONCE
-	rp.intensity = 0.8
-	rp.box_projection = true
-	add_child(rp)
-	return rp
-
-func _fit_reflection_probe() -> void:
-	var cols := board_size_x
-	var rows := board_size_z
-	var step := tile_world_size()
-	var probe := _ensure_reflection_probe()
-	var w: float = float(cols) * step
-	var d: float = float(rows) * step
-	var margin: float = maxf(0.0, probe_margin_tiles) * step
-	var h: float = maxf(0.5, probe_height)
-	probe.extents = Vector3(w * 0.5 + margin, h * 0.5, d * 0.5 + margin)
-	var center := Vector3(_grid_origin.x + w * 0.5, h * 0.5, _grid_origin.z + d * 0.5)
-	probe.global_position = center
-	if probe.update_mode == ReflectionProbe.UPDATE_ONCE:
-		probe.visible = false; probe.visible = true
-
-func _ensure_key_light() -> void:
-	var sun := get_node_or_null(KEY_LIGHT_NAME) as DirectionalLight3D
-	if sun == null:
-		sun = DirectionalLight3D.new()
-		sun.name = KEY_LIGHT_NAME
-		sun.shadow_enabled = true
-		sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-		sun.shadow_blur = 2.0
-		sun.shadow_normal_bias = 0.6
-		sun.shadow_bias = 0.02
-		sun.light_color = Color(1.0, 0.98, 0.95)
-		add_child(sun)
-
-	var use_plu := bool(ProjectSettings.get_setting("rendering/lights_and_shadows/use_physical_light_units", false))
-	sun.light_energy = (key_energy_lux if use_plu else key_energy_legacy)
-	if single_sun_mode: sun.rotation_degrees = Vector3(key_angle_deg, 0.0, 0.0)
-	else: sun.rotation_degrees = Vector3(key_angle_deg, key_azimuth_deg, 0.0)
-
-func _fit_key_shadow_distance() -> void:
-	var d := get_node_or_null(KEY_LIGHT_NAME) as DirectionalLight3D
-	if d == null: return
-	var step := tile_world_size()
-	var longest: float = float(max(board_size_x, board_size_z)) * step
-	d.directional_shadow_max_distance = longest * 2.0
-
-# Camera-follow fill (optional)
-func _ensure_camera_fill() -> void:
-	var use_plu := bool(ProjectSettings.get_setting("rendering/lights_and_shadows/use_physical_light_units", false))
-	var energy := (fill_energy_lm if use_plu else fill_energy_legacy)
-	if energy <= 0.0:
-		var old := get_node_or_null(FILL_LIGHT_NAME)
-		if old: old.queue_free()
-		return
-	var fill := get_node_or_null(FILL_LIGHT_NAME) as OmniLight3D
-	if fill == null:
-		fill = OmniLight3D.new()
-		fill.name = FILL_LIGHT_NAME
-		fill.shadow_enabled = false
-		add_child(fill)
-	fill.light_energy = energy
-	fill.light_specular = clamp(fill_specular, 0.0, 1.0)
-	fill.light_color = Color(1, 1, 1)
-	var w := float(board_size_x) * tile_size
-	var d := float(board_size_z) * tile_size
-	var diag := sqrt(w*w + d*d)
-	fill.omni_range = maxf(8.0, diag * 1.2)
-	var cam := get_viewport().get_camera_3d()
-	if cam:
-		fill.global_position = cam.global_transform.origin + Vector3(0.0, maxf(0.0, fill_height), 0.0)
-
-# Overhead OMNI (hotspot) — usually keep disabled
-func _ensure_overhead_fill() -> void:
-	var use_plu := bool(ProjectSettings.get_setting("rendering/lights_and_shadows/use_physical_light_units", false))
-	var energy := (overhead_fill_energy_lm if use_plu else overhead_fill_energy_legacy)
-	if not use_overhead_fill or energy <= 0.0:
-		var old := get_node_or_null(OVERHEAD_FILL_NAME)
-		if old: old.queue_free()
-		return
-	var omni := get_node_or_null(OVERHEAD_FILL_NAME) as OmniLight3D
-	if omni == null:
-		omni = OmniLight3D.new()
-		omni.name = OVERHEAD_FILL_NAME
-		omni.shadow_enabled = overhead_fill_shadow
-		add_child(omni)
-	omni.light_energy = energy
-	omni.light_specular = clamp(overhead_fill_specular, 0.0, 1.0)
-	omni.light_color = Color(1,1,1)
-	var w := float(board_size_x) * tile_size
-	var d := float(board_size_z) * tile_size
-	var diag := sqrt(w*w + d*d)
-	omni.omni_range = maxf(12.0, diag * 1.1)
-	var cx := _grid_origin.x + 0.5 * w
-	var cz := _grid_origin.z + 0.5 * d
-	omni.global_position = Vector3(cx, maxf(1.0, overhead_fill_height), cz)
-
-# Overhead DIRECTIONAL (recommended)
-func _ensure_overhead_sun() -> void:
-	var use_plu := bool(ProjectSettings.get_setting("rendering/lights_and_shadows/use_physical_light_units", false))
-	var base_e := (overhead_sun_energy_lux if use_plu else overhead_sun_energy_legacy)
-	if not use_overhead_sun or base_e <= 0.0:
-		var old := get_node_or_null(OVERHEAD_SUN_NAME)
-		if old: old.queue_free()
-		return
-	var sun := get_node_or_null(OVERHEAD_SUN_NAME) as DirectionalLight3D
-	if sun == null:
-		sun = DirectionalLight3D.new()
-		sun.name = OVERHEAD_SUN_NAME
-		sun.shadow_enabled = false
-		sun.light_color = Color(1,1,1)
-		add_child(sun)
-	sun.light_energy   = base_e
-	sun.light_specular = clamp(overhead_sun_specular, 0.0, 1.0)
-	sun.rotation_degrees = Vector3(overhead_sun_angle_deg, 0.0, 0.0)
-
-# Optional extras (no-op placeholders to avoid missing-function errors)
-func _ensure_corner_spots() -> void: pass
-func _ensure_center_bounce() -> void: pass
-func _ensure_rim_light() -> void: pass
