@@ -22,3 +22,4 @@ res://scenes/enemy_carrier.tscn
 res://scenes/sniper_tower.tscn
 res://scripts/tile.gd
 res://scripts/tower.gd
+res://scripts/sniper_tower.gd
