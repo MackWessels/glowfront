@@ -12,8 +12,10 @@ var _stats_layer: CanvasLayer = null
 # Laser settings
 @export var laser_width: float = 0.12
 @export var laser_duration: float = 0.07
-@export var laser_color_core: Color = Color(0, 0, 0, 0.95) # black, mostly opaque
-@export var laser_color_glow: Color = Color(0, 0, 0, 0.65) # softer outer band
+@export var laser_color_core: Color = Color8(255, 0, 0, 230)    # intense red core
+@export var laser_color_glow: Color = Color8(255, 99, 71, 165)  # softer red-orange glow
+
+
 
 # ---------- Base combat ----------
 @export var base_damage: int = 1

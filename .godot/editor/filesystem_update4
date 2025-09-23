@@ -21,3 +21,4 @@ res://scenes/miner_tower.tscn
 res://scenes/enemy_carrier.tscn
 res://scenes/sniper_tower.tscn
 res://scripts/tile.gd
+res://scripts/tower.gd

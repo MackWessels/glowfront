@@ -83,7 +83,7 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_r8pos")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ktxwe"]
-albedo_color = Color(0.25098, 0.27451, 0.301961, 1)
+albedo_color = Color(0.803922, 0.521569, 0.247059, 1)
 metallic = 0.95
 roughness = 0.35
 clearcoat_enabled = true
@@ -133,7 +133,7 @@ blend_shape_mode = 0
 shadow_mesh = SubResource("ArrayMesh_dd7d4")
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_qrbg1"]
-albedo_color = Color(0.25098, 0.27451, 0.301961, 1)
+albedo_color = Color(0.803922, 0.521569, 0.247059, 1)
 metallic = 0.95
 roughness = 0.35
 clearcoat_enabled = true
