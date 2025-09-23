@@ -55,13 +55,13 @@ main_menu_path = "uid://dwdo6442wh28n"
 
 [node name="OverheadCamera" type="Camera3D" parent="."]
 process_mode = 3
-transform = Transform3D(1, 0, 0, 0, 0.34202, 0.939693, 0, -0.939693, 0.34202, 9, 12, 16)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 12, 16)
 current = true
 script = ExtResource("2_tefeu")
 tile_board_path = NodePath("../TileBoard")
 
-[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
-transform = Transform3D(-4.37114e-08, -0.707107, 0.707107, 0, 0.707107, 0.707107, -1, 3.09086e-08, -3.09086e-08, 15.0105, 15, -0.0108695)
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="OverheadCamera"]
+transform = Transform3D(1, 0, 0, 0, 0.951057, 0.309017, 0, -0.309017, 0.951057, 0, 0, 0)
 light_color = Color(0.905165, 0.941938, 0.999999, 1)
 light_indirect_energy = 0.8
 light_specular = 0.8
@@ -71,7 +71,7 @@ shadow_normal_bias = 0.6
 shadow_reverse_cull_face = true
 shadow_opacity = 0.65
 
-[node name="FillLight" type="DirectionalLight3D" parent="DirectionalLight3D"]
+[node name="FillLight" type="DirectionalLight3D" parent="OverheadCamera/DirectionalLight3D"]
 light_color = Color(1, 0.894118, 0.780392, 1)
 light_energy = 0.18
 light_indirect_energy = 0.5

@@ -1,10 +1,10 @@
+MeshInstance3D
 ReflectionProbe
 DirectionalLight3D
 Button
 CharacterBody3D
 CollisionShape3D
 StaticBody3D
-MeshInstance3D
 Marker3D
 Area3D
 Node3D
@@ -12,4 +12,3 @@ Node
 Control
 HBoxContainer
 CanvasLayer
-TextureRect
