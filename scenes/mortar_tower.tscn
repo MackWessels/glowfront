@@ -388,7 +388,7 @@ script = ExtResource("1_2i3vw")
 detection_area_path = NodePath("DetectionArea")
 click_body_path = NodePath("ClickBody")
 yaw_path = NodePath("mortarv2/Yaw")
-pitch_path = NodePath("mortarv2/Yaw/Pitch")
+pitch_path = NodePath("mortarv2/Yaw/PitchPivot")
 yaw_offset_deg = -110.0
 shell_scene = ExtResource("2_0cdxi")
 
@@ -409,70 +409,71 @@ transform = Transform3D(2, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0.4, 0)
 visible = false
 
 [node name="mortarv2" type="Node3D" parent="."]
-transform = Transform3D(0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0.232856, 0)
+transform = Transform3D(-2.18557e-08, 0, 0.5, 0, 0.5, 0, -0.5, 0, -2.18557e-08, 0, 0.232856, 0)
 
 [node name="Yaw" type="Node3D" parent="mortarv2"]
 transform = Transform3D(2.4, 0, 0, 0, 2.4, 0, 0, 0, 2.4, 0, 0.334288, 0)
 
-[node name="Pitch" type="Node3D" parent="mortarv2/Yaw"]
+[node name="PitchPivot" type="Node3D" parent="mortarv2/Yaw"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2.10071e-09, -0.00440291, 0.0480586)
 
-[node name="Cube" type="MeshInstance3D" parent="mortarv2/Yaw/Pitch"]
-transform = Transform3D(0.416667, 0, 0, 0, 0.535487, -0.150026, 0, 0.275511, 0.291594, 0, 0.551722, 0)
+[node name="Turret" type="MeshInstance3D" parent="mortarv2/Yaw/PitchPivot"]
+transform = Transform3D(0.416667, 0, 0, 0, 0.535487, -0.150026, 1.77636e-15, 0.275511, 0.291594, 3.42155e-09, 0.551722, -0.0782759)
 mesh = SubResource("ArrayMesh_aa66l")
 skeleton = NodePath("")
 
-[node name="Cylinder_005" type="MeshInstance3D" parent="mortarv2/Yaw/Pitch/Cube"]
+[node name="muzzle1" type="MeshInstance3D" parent="mortarv2/Yaw/PitchPivot/Turret"]
 transform = Transform3D(0.3, 0, 0, 0, 0.0207241, 0.0116808, 0, -0.00214509, 0.38058, -0.406741, 0.891527, 0.39772)
 mesh = SubResource("ArrayMesh_qjed0")
 skeleton = NodePath("")
 
-[node name="Cylinder_006" type="MeshInstance3D" parent="mortarv2/Yaw/Pitch/Cube"]
+[node name="MuzzlePoint" type="Marker3D" parent="mortarv2/Yaw/PitchPivot/Turret/muzzle1"]
+transform = Transform3D(2.16658, 3.11127, 1.42109e-14, -19.7926, 28.4229, 12.4624, 0.881228, -1.26547, 2.7991, 8.4979, -21.5803, -2.20573)
+
+[node name="muzzle2" type="MeshInstance3D" parent="mortarv2/Yaw/PitchPivot/Turret"]
 transform = Transform3D(0.3, 0, 0, 0, 0.0207241, 0.0116808, 0, -0.00214509, 0.38058, 0.374483, 0.857965, -0.415613)
 mesh = SubResource("ArrayMesh_6wg4s")
 skeleton = NodePath("")
 
-[node name="Cylinder_007" type="MeshInstance3D" parent="mortarv2/Yaw/Pitch/Cube"]
+[node name="muzzle3" type="MeshInstance3D" parent="mortarv2/Yaw/PitchPivot/Turret"]
 transform = Transform3D(0.3, 0, 0, 0, 0.0207241, 0.0116808, 0, -0.00214509, 0.38058, -0.431916, 0.857965, -0.415613)
 mesh = SubResource("ArrayMesh_e1h51")
 skeleton = NodePath("")
 
-[node name="MuzzlePoint" type="Marker3D" parent="mortarv2/Yaw/Pitch/Cube/Cylinder_007"]
-transform = Transform3D(2.16658, 3.11127, 0, -19.7926, 28.4229, 12.4624, 0.881228, -1.26547, 2.7991, 8.58181, -21.1667, -0.0663104)
-
-[node name="Cylinder_004" type="MeshInstance3D" parent="mortarv2/Yaw/Pitch/Cube"]
+[node name="muzzle4" type="MeshInstance3D" parent="mortarv2/Yaw/PitchPivot/Turret"]
 transform = Transform3D(0.3, 0, 0, 0, 0.0207241, 0.0116808, 0, -0.00214509, 0.38058, 0.374483, 0.888577, 0.387193)
 mesh = SubResource("ArrayMesh_twecu")
 skeleton = NodePath("")
 
-[node name="Cylinder_002" type="MeshInstance3D" parent="mortarv2/Yaw"]
+[node name="base" type="MeshInstance3D" parent="mortarv2/Yaw"]
 transform = Transform3D(0, 0, 0.541667, 0, 0.0125, 0, -0.541667, 0, 0, 0, -0.139287, 0)
 mesh = SubResource("ArrayMesh_3dgrt")
 skeleton = NodePath("")
 
-[node name="Cube_001" type="MeshInstance3D" parent="mortarv2/Yaw/Cylinder_002"]
+[node name="stand1" type="MeshInstance3D" parent="mortarv2/Yaw/base"]
 transform = Transform3D(0, 0, -0.12235, 0, 29.0753, 0, -0.0840702, 0, 0, 0.0397792, 30.1828, 0.882335)
 mesh = SubResource("ArrayMesh_oprtu")
 skeleton = NodePath("")
 
-[node name="Cube_002" type="MeshInstance3D" parent="mortarv2/Yaw/Cylinder_002"]
+[node name="stand2" type="MeshInstance3D" parent="mortarv2/Yaw/base"]
 transform = Transform3D(0, 0, 0.12235, 0, 29.0753, 0, 0.0840702, 0, 0, 0.0397792, 30.1828, -0.878154)
 mesh = SubResource("ArrayMesh_d38s3")
 skeleton = NodePath("")
 
-[node name="Cylinder_003" type="MeshInstance3D" parent="mortarv2/Yaw/Cylinder_002"]
+[node name="vertPiviot1" type="MeshInstance3D" parent="mortarv2/Yaw/base"]
 transform = Transform3D(0.384615, 0, 0, 0, 0, -16.6667, 0, 0.0230769, 0, 0.0483931, 54.9947, -0.788756)
 mesh = SubResource("ArrayMesh_sxyrr")
 skeleton = NodePath("")
 
-[node name="Cylinder_001" type="MeshInstance3D" parent="mortarv2/Yaw/Cylinder_002"]
+[node name="vertPiviot2" type="MeshInstance3D" parent="mortarv2/Yaw/base"]
 transform = Transform3D(0.384615, 0, 0, 0, 0, -16.6667, 0, 0.0230769, 0, 0.0483932, 54.9947, 0.787685)
 mesh = SubResource("ArrayMesh_ro228")
 skeleton = NodePath("")
 
-[node name="Base" type="MeshInstance3D" parent="mortarv2"]
-transform = Transform3D(4, 0, 0, 0, 0.4, 0, 0, 0, 4, 0, -0.105712, 0)
+[node name="fence" parent="." instance=ExtResource("3_vbdq2")]
+
+[node name="Base" type="MeshInstance3D" parent="fence"]
+transform = Transform3D(-8.74228e-08, 0, 2, 0, 0.2, 0, -2, 0, -8.74228e-08, 0, 0.18, 0)
 visible = false
 mesh = SubResource("ArrayMesh_jpxsq")
 skeleton = NodePath("")
-
-[node name="fence" parent="." instance=ExtResource("3_vbdq2")]
