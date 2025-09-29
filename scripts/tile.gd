@@ -106,13 +106,16 @@ func _input_event(_cam: Camera3D, e: InputEvent, _pos: Vector3, _n: Vector3, _sh
 # Animation helpers
 # ========================================================
 func _tile_step() -> float:
-	var step := 1.0
-	if tile_board:
-		if tile_board.has_method("tile_world_size"):
-			step = float(tile_board.call("tile_world_size"))
-		elif tile_board.has("tile_size"):
-			step = float(tile_board.get("tile_size"))
-	return step
+	var tb := get("tile_board") as Node
+	if tb and tb.has_method("tile_world_size"):
+		return float(tb.call("tile_world_size"))
+
+	# Fallback: try a plain property read; `get()` returns null if absent.
+	var v: Variant = (tb.get("tile_size") if tb else null)
+	if typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT:
+		return float(v)
+
+	return 1.0
 
 # Plays: hatch open -> raise child -> hatch close (this tile only)
 func _animate_hatch_and_raise(child: Node3D) -> void:

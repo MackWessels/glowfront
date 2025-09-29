@@ -1,61 +1,56 @@
+# res://scripts/tile_board.gd
 extends Node3D
 
 # ===================== Inspector =====================
-@export var spawner_span: int = 3
-@export var goal_span: int = 1
+@export var tile_scene: PackedScene
 @export var board_size_x: int = 10
 @export var board_size_z: int = 11
-@export var tile_scene: PackedScene
 @export var tile_size: float = 2.0
 @export var goal_node: Node3D
 @export var spawner_node: Node3D
 @export var placement_menu: PopupMenu
+@export var use_bounds: bool = true  
 
-# Costs
-@export var turret_cost: int = 10
-@export var mortar_cost: int = 20
-@export var wall_cost: int = 5
-@export var miner_cost: int = 10
-@export var tesla_cost: int = 10
-@export var shard_miner_cost: int = 20
-@export var sniper_cost: int = 16
+# ===================== Internal config =====================
+const SPAWNER_SPAN := 3
+const GOAL_SPAN := 1
 
-# Bounds & pens
-@export var use_bounds: bool = true
-@export var carve_openings_for_portals: bool = true
-@export var wall_thickness: float = 0.35
-@export var wall_height: float = 2.5
+# Build costs (base)
+const COSTS := {
+	"turret": 10,
+	"mortar": 20,
+	"wall": 5,
+	"miner": 10,
+	"tesla": 10,
+	"shard_miner": 20,
+	"sniper": 16,
+}
 
-var _debug_mesh_enabled := false
-@export var render_debug_wall_mesh := false:
-	set(value):
-		_debug_mesh_enabled = value
-		if is_inside_tree() and use_bounds:
-			_create_bounds()
-	get:
-		return _debug_mesh_enabled
 
-var _pending_hover_cells: Array[Vector2i] = []
+const BOUNDS := {
+	"carve_openings": true,
+	"wall_thickness": 0.35,
+	"wall_height": 2.5,
+	"build_spawn_pen": true,
+	"build_goal_pen":  true,
+	"pen_depth_cells": 2,
+	"pen_wing_cells":  0,
+	"pen_thickness":   0.35,
+	"pen_height":      2.5,
+	"pen_entry_inset": 0.30,
+}
 
 # Collision (Enemy on Layer 3, mask includes 2)
-@export var wall_collision_layer: int = 1 << 1
-@export var wall_collision_mask:  int = 1 << 2
-
-# Pens
-@export var build_spawn_pen: bool = true
-@export var build_goal_pen: bool = true
-@export var pen_depth_cells: int = 2
-@export var pen_wing_cells: int = 0
-@export var pen_thickness: float = 0.35
-@export var pen_height: float = 2.5
-@export var pen_entry_inset: float = 0.30
+const WALL_COLLISION_LAYER := 1 << 1
+const WALL_COLLISION_MASK  := 1 << 2
 
 # Flow
-@export var goal_points_outward: bool = true
+const GOAL_POINTS_OUTWARD := true
+const ANCHOR_SPAWNER_OFFBOARD := true
+const OFFBOARD_DISTANCE_TILES := 1.0
 
-# Off-board spawner anchoring
-@export var anchor_spawner_offboard: bool = true
-@export var offboard_distance_tiles: float = 1.0
+# Debug (internal)
+const RENDER_DEBUG_WALL_MESH := false
 
 # ---------------- Groups / Polling ----------------
 const ENEMY_GROUP: String = "enemy"
@@ -65,10 +60,10 @@ const PENDING_POLL_HZ := 6.0
 signal global_path_changed
 
 # ---------------- State ----------------
-var tiles: Dictionary = {}                    # Vector2i -> Node3D
+var tiles: Dictionary = {}                   
 var active_tile: Node = null
-
 var _pending_tile: Node = null
+var _pending_hover_cells: Array[Vector2i] = []
 var _reserved_cells: Dictionary = {}          # Vector2i -> true
 var _pending_builds: Array[Dictionary] = []   # {"cell":Vector2i,"cells":Array[Vector2i], "tile":Node, "action":String, "cost":int}
 
@@ -78,7 +73,6 @@ var dir_field: Dictionary = {}                # Vector2i -> Vector3
 var _grid_origin: Vector3 = Vector3.ZERO
 var _step: float = 1.0
 var _poll_accum: float = 0.0
-
 var path_version: int = 0
 
 const ORTHO_DIRS: Array[Vector2i] = [
@@ -87,27 +81,12 @@ const ORTHO_DIRS: Array[Vector2i] = [
 ]
 const EPS := 0.0001
 
-# ---------------- Public helpers for UI ----------------
-func get_action_cost(action: String) -> int:
-	return _power_cost_for(action)
-
-func _cost_for_action(action: String) -> int:
-	match action:
-		"turret":       return turret_cost
-		"mortar":       return mortar_cost
-		"wall":         return wall_cost
-		"miner":        return miner_cost
-		"tesla":        return tesla_cost
-		"shard_miner":  return (shard_miner_cost if shard_miner_cost >= 0 else mortar_cost)
-		"sniper":       return (sniper_cost if sniper_cost >= 0 else turret_cost)
-		_:              return 0
-
 # ==================== Lifecycle ====================
 func _ready() -> void:
 	add_to_group("TileBoard")
 	generate_board()
 
-	var origin_tile := tiles.get(Vector2i(0, 0), null) as Node3D
+	var origin_tile = tiles.get(Vector2i(0, 0), null) as Node3D
 	_grid_origin = (origin_tile.global_position if origin_tile != null else global_position)
 	_step = tile_size
 
@@ -138,18 +117,11 @@ func _physics_process(delta: float) -> void:
 func rebuild_bounds() -> void:
 	if use_bounds:
 		_create_bounds()
-	_after_board_resized()
-
-func _after_board_resized() -> void:
-	# (Lighting & probe hooks removed)
-	pass
 
 # ================= PowerUps hookup =================
 func _connect_powerups() -> void:
 	var pu := get_node_or_null("/root/PowerUps")
-	if pu == null: return
-	if pu.has_signal("upgrade_purchased") and not pu.is_connected("upgrade_purchased", Callable(self, "_on_upgrade_purchased")):
-		pu.connect("upgrade_purchased", Callable(self, "_on_upgrade_purchased"))
+	pu.connect("upgrade_purchased", Callable(self, "_on_upgrade_purchased"))
 
 func _on_upgrade_purchased(id: String, _lvl: int, _next_cost: int) -> void:
 	match id:
@@ -157,10 +129,9 @@ func _on_upgrade_purchased(id: String, _lvl: int, _next_cost: int) -> void:
 		"board_add_right": _add_row_at_bottom()
 		"board_push_back": _add_column_at_spawner_edge()
 
-# ---------------- Public helpers (Enemy) ----------------
-func tile_world_size() -> float: return _step
-func cell_center(c: Vector2i) -> Vector3: return cell_to_world(c)
-func is_in_bounds(c: Vector2i) -> bool: return _in_bounds(c)
+# ---------------- Public helpers for UI ----------------
+func get_action_cost(action: String) -> int:
+	return _power_cost_for(action)
 
 # ================= Pending/highlight =================
 func set_active_tile(tile: Node, armed_action: String = "") -> void:
@@ -314,7 +285,7 @@ func _outward_step_for_cell(cell: Vector2i) -> Vector2i:
 
 # ================= Spawner helpers =================
 func get_spawn_pen(span: int = -1) -> Dictionary:
-	if span <= 0: span = spawner_span
+	if span <= 0: span = SPAWNER_SPAN
 	var b := _grid_bounds()
 
 	var sp_world: Vector3 = spawner_node.global_position
@@ -383,12 +354,12 @@ func _is_in_spawn_opening(cell: Vector2i, span: int = -1) -> bool:
 
 # ================= Off-board spawner anchoring =================
 func _place_spawner_offboard_strip() -> void:
-	if not anchor_spawner_offboard or spawner_node == null: return
-	var info := get_spawn_pen(spawner_span)
+	if not ANCHOR_SPAWNER_OFFBOARD or spawner_node == null: return
+	var info := get_spawn_pen(SPAWNER_SPAN)
 	var exits: Array = info.get("entry_targets", [])
 	var fwd: Vector3 = info.get("forward", Vector3.FORWARD)
 	if exits.is_empty(): return
-	var dist := _step * maxf(0.0, offboard_distance_tiles)
+	var dist := _step * maxf(0.0, OFFBOARD_DISTANCE_TILES)
 	var mid := int(exits.size() / 2)
 	spawner_node.global_position = (exits[mid] as Vector3) - fwd * dist
 
@@ -434,7 +405,7 @@ func _recompute_flow() -> bool:
 				if L > EPS: dir_v = d / L
 		new_dir[cell] = dir_v
 
-	if goal_points_outward:
+	if GOAL_POINTS_OUTWARD:
 		var outward := _outward_dir_for_cell(goal_cell)
 		if outward.length_squared() > 1e-6:
 			new_dir[goal_cell] = outward
@@ -490,7 +461,7 @@ func _path_ok_if_blocked(block_cells: Array[Vector2i]) -> bool:
 	var ok_bfs := _recompute_flow()
 	var reachable := false
 	if ok_bfs:
-		var entries := spawn_pen_cells(spawner_span)
+		var entries := spawn_pen_cells(SPAWNER_SPAN)
 		for sc in entries:
 			if cost.has(sc): reachable = true; break
 	else:
@@ -503,7 +474,7 @@ func _path_ok_if_blocked(block_cells: Array[Vector2i]) -> bool:
 func next_cell_from(c: Vector2i) -> Vector2i:
 	var g := _goal_cell()
 	if c == g:
-		if goal_points_outward:
+		if GOAL_POINTS_OUTWARD:
 			var step := _outward_step_for_cell(g)
 			if step != Vector2i.ZERO: return g + step
 		return g
@@ -644,7 +615,7 @@ func _on_place_selected(action: String) -> void:
 		var action_cost := _power_cost_for("mortar")
 		if action_cost > 0 and not _econ_can_afford(action_cost): return
 		for c in cells:
-			if _is_in_spawn_opening(c, spawner_span): _clear_pending(); return
+			if _is_in_spawn_opening(c, SPAWNER_SPAN): _clear_pending(); return
 		for c2 in cells:
 			if not _tile_is_walkable(c2): _clear_pending(); return
 		if not _path_ok_if_blocked(cells): _clear_pending(); return
@@ -681,7 +652,7 @@ func _on_place_selected(action: String) -> void:
 		var action_cost_sm := _power_cost_for("shard_miner")
 		if action_cost_sm > 0 and not _econ_can_afford(action_cost_sm): return
 		for csm in cells_sm:
-			if _is_in_spawn_opening(csm, spawner_span): _clear_pending(); return
+			if _is_in_spawn_opening(csm, SPAWNER_SPAN): _clear_pending(); return
 		for csm2 in cells_sm:
 			if not _tile_is_walkable(csm2): _clear_pending(); return
 		if not _path_ok_if_blocked(cells_sm): _clear_pending(); return
@@ -717,7 +688,7 @@ func _on_place_selected(action: String) -> void:
 	var action_cost2 := _power_cost_for(action)
 
 	if blocks and action_cost2 > 0 and not _econ_can_afford(action_cost2): return
-	if blocks and _is_in_spawn_opening(pos, spawner_span): _clear_pending(); return
+	if blocks and _is_in_spawn_opening(pos, SPAWNER_SPAN): _clear_pending(); return
 	if blocks and not _tile_is_walkable(pos): _clear_pending(); return
 
 	if blocks:
@@ -752,7 +723,7 @@ func _on_place_selected(action: String) -> void:
 
 # ---------------- Helpers ----------------
 func _power_cost_for(action: String) -> int:
-	var base := _cost_for_action(action)
+	var base := (COSTS.get(action, 0) as int)
 	var pu: Node = get_node_or_null("/root/PowerUps")
 	if pu and pu.has_method("modified_cost"):
 		return int(pu.call("modified_cost", action, base))
@@ -787,7 +758,7 @@ func _create_bounds() -> void:
 	var bottom_z: float = _grid_origin.z + (board_size_z - 0.5) * _step
 
 	var openings: Dictionary = {"left": [], "right": [], "top": [], "bottom": []}
-	if carve_openings_for_portals:
+	if BOUNDS["carve_openings"]:
 		var b := _grid_bounds()
 		var sp_cell := world_to_cell(spawner_node.global_position)
 		var sp_side := _side_of_cell(sp_cell, b)
@@ -796,7 +767,7 @@ func _create_bounds() -> void:
 		elif sp_side == "right": sp_edge.x = b.position.x + b.size.x - 1
 		elif sp_side == "top": sp_edge.y = b.position.y
 		else: sp_edge.y = b.position.y - 1 + b.size.y
-		openings[sp_side].append(_opening_range_for(sp_side, sp_edge, spawner_span))
+		openings[sp_side].append(_opening_range_for(sp_side, sp_edge, SPAWNER_SPAN))
 
 		var gl_cell := world_to_cell(goal_node.global_position)
 		var gl_side := _side_of_cell(gl_cell, b)
@@ -805,14 +776,14 @@ func _create_bounds() -> void:
 		elif gl_side == "right": gl_edge.x = b.position.x + b.size.x - 1
 		elif gl_side == "top": gl_edge.y = b.position.y
 		else: gl_edge.y = b.position.y - 1 + b.size.y
-		openings[gl_side].append(_opening_range_for(gl_side, gl_edge, max(1, goal_span)))
+		openings[gl_side].append(_opening_range_for(gl_side, gl_edge, max(1, GOAL_SPAN)))
 
 	_build_side_walls(container, "top",    top_z,    left_x, right_x, openings["top"])
 	_build_side_walls(container, "bottom", bottom_z, left_x, right_x, openings["bottom"])
 	_build_side_walls(container, "left",   left_x,   top_z,  bottom_z, openings["left"])
 	_build_side_walls(container, "right",  right_x,  top_z,  bottom_z, openings["right"])
 
-	if build_spawn_pen or build_goal_pen:
+	if BOUNDS["build_spawn_pen"] or BOUNDS["build_goal_pen"]:
 		_build_pens_for(container, openings)
 
 func _build_side_walls(parent: Node3D, side: String, side_line: float, min_lateral: float, max_lateral: float, open_list: Array) -> void:
@@ -841,14 +812,14 @@ func _build_side_walls(parent: Node3D, side: String, side_line: float, min_later
 			if b - a <= 0.0001: continue
 			center = Vector3((a + b) * 0.5, 0.0, side_line)
 			size_x = (b - a)
-			size_z = wall_thickness
+			size_z = float(BOUNDS["wall_thickness"])
 		else:
 			if b - a <= 0.0001: continue
 			center = Vector3(side_line, 0.0, (a + b) * 0.5)
-			size_x = wall_thickness
+			size_x = float(BOUNDS["wall_thickness"])
 			size_z = (b - a)
 
-		_make_wall(parent, center, size_x, size_z, wall_height, "Wall_%s_%d" % [side, i])
+		_make_wall(parent, center, size_x, size_z, float(BOUNDS["wall_height"]), "Wall_%s_%d" % [side, i])
 
 func _opening_range_for(side: String, edge_cell: Vector2i, span: int) -> Vector2:
 	if span <= 0: span = 1
@@ -869,9 +840,9 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 	var top_z: float    = _grid_origin.z - _step * 0.5
 	var bottom_z: float = _grid_origin.z + (board_size_z - 0.5) * _step
 
-	var depth_w: float = float(max(0, pen_depth_cells)) * _step
-	var wing_cells_i: int = int(max(0, pen_wing_cells))
-	var inset: float = clampf(pen_entry_inset, 0.0, depth_w)
+	var depth_w: float = float(max(0, int(BOUNDS["pen_depth_cells"]))) * _step
+	var wing_cells_i: int = int(max(0, int(BOUNDS["pen_wing_cells"])))
+	var inset: float = clampf(float(BOUNDS["pen_entry_inset"]), 0.0, depth_w)
 
 	# TOP
 	for o in openings["top"]:
@@ -880,11 +851,11 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 		var ext_b: float = min(right_x, v.y + float(wing_cells_i) * _step)
 		var inner_depth: float = depth_w - inset
 		if inner_depth <= 0.001: continue
-		var back_c: Vector3 = Vector3((ext_a + ext_b) * 0.5, 0.0, top_z - depth_w - 0.5 * pen_thickness)
-		_make_wall(container, back_c, max(0.0, ext_b - ext_a), pen_thickness, pen_height, "PenTop_Back")
+		var back_c: Vector3 = Vector3((ext_a + ext_b) * 0.5, 0.0, top_z - depth_w - 0.5 * float(BOUNDS["pen_thickness"]))
+		_make_wall(container, back_c, max(0.0, ext_b - ext_a), float(BOUNDS["pen_thickness"]), float(BOUNDS["pen_height"]), "PenTop_Back")
 		var wing_z_center: float = top_z - (depth_w + inset) * 0.5
-		_make_wall(container, Vector3(ext_a, 0.0, wing_z_center), pen_thickness, inner_depth, pen_height, "PenTop_WingL")
-		_make_wall(container, Vector3(ext_b, 0.0, wing_z_center), pen_thickness, inner_depth, pen_height, "PenTop_WingR")
+		_make_wall(container, Vector3(ext_a, 0.0, wing_z_center), float(BOUNDS["pen_thickness"]), inner_depth, float(BOUNDS["pen_height"]), "PenTop_WingL")
+		_make_wall(container, Vector3(ext_b, 0.0, wing_z_center), float(BOUNDS["pen_thickness"]), inner_depth, float(BOUNDS["pen_height"]), "PenTop_WingR")
 
 	# BOTTOM
 	for o2 in openings["bottom"]:
@@ -893,11 +864,11 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 		var ext_b2: float = min(right_x, v2.y + float(wing_cells_i) * _step)
 		var inner_depth2: float = depth_w - inset
 		if inner_depth2 <= 0.001: continue
-		var back_c2: Vector3 = Vector3((ext_a2 + ext_b2) * 0.5, 0.0, bottom_z + depth_w + 0.5 * pen_thickness)
-		_make_wall(container, back_c2, max(0.0, ext_b2 - ext_a2), pen_thickness, pen_height, "PenBottom_Back")
+		var back_c2: Vector3 = Vector3((ext_a2 + ext_b2) * 0.5, 0.0, bottom_z + depth_w + 0.5 * float(BOUNDS["pen_thickness"]))
+		_make_wall(container, back_c2, max(0.0, ext_b2 - ext_a2), float(BOUNDS["pen_thickness"]), float(BOUNDS["pen_height"]), "PenBottom_Back")
 		var wing_z_center2: float = bottom_z + (depth_w + inset) * 0.5
-		_make_wall(container, Vector3(ext_a2, 0.0, wing_z_center2), pen_thickness, inner_depth2, pen_height, "PenBottom_WingL")
-		_make_wall(container, Vector3(ext_b2, 0.0, wing_z_center2), pen_thickness, inner_depth2, pen_height, "PenBottom_WingR")
+		_make_wall(container, Vector3(ext_a2, 0.0, wing_z_center2), float(BOUNDS["pen_thickness"]), inner_depth2, float(BOUNDS["pen_height"]), "PenBottom_WingL")
+		_make_wall(container, Vector3(ext_b2, 0.0, wing_z_center2), float(BOUNDS["pen_thickness"]), inner_depth2, float(BOUNDS["pen_height"]), "PenBottom_WingR")
 
 	# LEFT
 	for o3 in openings["left"]:
@@ -906,11 +877,11 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 		var ext_b3: float = min(bottom_z, v3.y + float(wing_cells_i) * _step)
 		var inner_depth3: float = depth_w - inset
 		if inner_depth3 <= 0.001: continue
-		var back_c3: Vector3 = Vector3(left_x - depth_w - 0.5 * pen_thickness, 0.0, (ext_a3 + ext_b3) * 0.5)
-		_make_wall(container, back_c3, pen_thickness, max(0.0, ext_b3 - ext_a3), pen_height, "PenLeft_Back")
+		var back_c3: Vector3 = Vector3(left_x - depth_w - 0.5 * float(BOUNDS["pen_thickness"]), 0.0, (ext_a3 + ext_b3) * 0.5)
+		_make_wall(container, back_c3, float(BOUNDS["pen_thickness"]), max(0.0, ext_b3 - ext_a3), float(BOUNDS["pen_height"]), "PenLeft_Back")
 		var wing_x_center3: float = left_x - (depth_w + inset) * 0.5
-		_make_wall(container, Vector3(wing_x_center3, 0.0, ext_a3), inner_depth3, pen_thickness, pen_height, "PenLeft_WingT")
-		_make_wall(container, Vector3(wing_x_center3, 0.0, ext_b3), inner_depth3, pen_thickness, pen_height, "PenLeft_WingB")
+		_make_wall(container, Vector3(wing_x_center3, 0.0, ext_a3), inner_depth3, float(BOUNDS["pen_thickness"]), float(BOUNDS["pen_height"]), "PenLeft_WingT")
+		_make_wall(container, Vector3(wing_x_center3, 0.0, ext_b3), inner_depth3, float(BOUNDS["pen_thickness"]), float(BOUNDS["pen_height"]), "PenLeft_WingB")
 
 	# RIGHT
 	for o4 in openings["right"]:
@@ -919,23 +890,23 @@ func _build_pens_for(container: Node3D, openings: Dictionary) -> void:
 		var ext_b4: float = min(bottom_z, v4.y + float(wing_cells_i) * _step)
 		var inner_depth4: float = depth_w - inset
 		if inner_depth4 <= 0.001: continue
-		var back_c4: Vector3 = Vector3(right_x + depth_w + 0.5 * pen_thickness, 0.0, (ext_a4 + ext_b4) * 0.5)
-		_make_wall(container, back_c4, pen_thickness, max(0.0, ext_b4 - ext_a4), pen_height, "PenRight_Back")
+		var back_c4: Vector3 = Vector3(right_x + depth_w + 0.5 * float(BOUNDS["pen_thickness"]), 0.0, (ext_a4 + ext_b4) * 0.5)
+		_make_wall(container, back_c4, float(BOUNDS["pen_thickness"]), max(0.0, ext_b4 - ext_a4), float(BOUNDS["pen_height"]), "PenRight_Back")
 		var wing_x_center4: float = right_x + (depth_w + inset) * 0.5
-		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_a4), inner_depth4, pen_thickness, pen_height, "PenRight_WingT")
-		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_b4), inner_depth4, pen_thickness, pen_height, "PenRight_WingB")
+		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_a4), inner_depth4, float(BOUNDS["pen_thickness"]), float(BOUNDS["pen_height"]), "PenRight_WingT")
+		_make_wall(container, Vector3(wing_x_center4, 0.0, ext_b4), inner_depth4, float(BOUNDS["pen_thickness"]), float(BOUNDS["pen_height"]), "PenRight_WingB")
 
 func _make_wall(parent: Node3D, center_on_ground: Vector3, size_x: float, size_z: float, height: float, name: String) -> void:
 	if size_x <= 0.0001 or size_z <= 0.0001 or height <= 0.0001: return
 	var sb := StaticBody3D.new(); sb.name = name; parent.add_child(sb)
-	sb.collision_layer = wall_collision_layer
-	sb.collision_mask  = wall_collision_mask
+	sb.collision_layer = WALL_COLLISION_LAYER
+	sb.collision_mask  = WALL_COLLISION_MASK
 	sb.input_ray_pickable = false
 	sb.global_position = center_on_ground + Vector3(0.0, height * 0.5, 0.0)
 	var cs := CollisionShape3D.new()
 	var box := BoxShape3D.new(); box.size = Vector3(size_x, height, size_z)
 	cs.shape = box; sb.add_child(cs)
-	if render_debug_wall_mesh:
+	if RENDER_DEBUG_WALL_MESH:
 		var mi := MeshInstance3D.new()
 		var bm := BoxMesh.new(); bm.size = Vector3(size_x, height, size_z)
 		mi.mesh = bm; mi.ray_pickable = false; sb.add_child(mi)
@@ -968,7 +939,7 @@ func _add_row_at_top() -> void:
 		tile.set("tile_board", self)
 		tile.set("placement_menu", placement_menu)
 		tiles[c2] = tile
-	rebuild_bounds(); _recompute_flow(); _emit_path_changed(); _after_board_resized()
+	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
 
 func _add_row_at_bottom() -> void:
 	var new_z := board_size_z
@@ -982,7 +953,7 @@ func _add_row_at_bottom() -> void:
 		tile.set("tile_board", self)
 		tile.set("placement_menu", placement_menu)
 		tiles[c] = tile
-	rebuild_bounds(); _recompute_flow(); _emit_path_changed(); _after_board_resized()
+	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
 
 func _add_column_at_spawner_edge() -> void:
 	var b := _grid_bounds()
@@ -1026,7 +997,7 @@ func _add_column_at_spawner_edge() -> void:
 		"top": pass
 		"bottom": pass
 	_place_spawner_offboard_strip()
-	rebuild_bounds(); _recompute_flow(); _emit_path_changed(); _after_board_resized()
+	rebuild_bounds(); _recompute_flow(); _emit_path_changed()
 
 # ================= Enemy retag/move =================
 func _retag_enemy_cells(dx: int, dz: int) -> void:
