@@ -20,3 +20,4 @@ res://scenes/mortar_shell.tscn
 res://scenes/enemy_carrier.tscn
 res://scenes/sniper_tower.tscn
 res://scenes/shard_miner.tscn
+res://scripts/miner_tower.gd
